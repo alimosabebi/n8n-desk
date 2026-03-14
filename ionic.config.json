@@ -1,0 +1,7 @@
+{
+  "name": "n8n-desk",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "vue-vite"
+}

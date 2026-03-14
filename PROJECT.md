@@ -171,6 +171,146 @@ n8n-desk is **Claude-first** but supports multiple providers:
 
 ---
 
+## Local Agent Capabilities
+
+The local agent (Cowork and Workflow modes) is built on the **Deep Agents SDK** with LangChain. Beyond mode-specific tools (workflow execution, MCP CRUD), every agent session has access to a rich set of built-in capabilities, an extensible skills system, and pluggable MCP servers.
+
+### Built-in Tools (from Deep Agents SDK)
+
+These are available out of the box in every agent session — no configuration required:
+
+| Tool | Purpose |
+|---|---|
+| `write_todos` | Task planning and progress tracking — agent breaks complex tasks into steps, shown in the UI |
+| `ls` | List directory contents |
+| `read_file` | Read file contents from the working directory |
+| `write_file` | Create or overwrite files in the working directory |
+| `edit_file` | Make precise edits to existing files |
+| `glob` | Find files by pattern (`**/*.ts`, `src/**/*.py`) |
+| `grep` | Search file contents with regex |
+| Subagent spawning | Delegate subtasks to isolated child agents for parallel work |
+| Summarization | Auto-summarizes conversation when context gets large (at 85% of model's token limit) |
+| Prompt caching | Anthropic prompt caching middleware — reduces token cost on repeated tool patterns |
+
+### Skills System
+
+n8n-desk supports a **markdown-based skills system** modeled after the Claude Agent SDK's skill format. Skills are specialized capabilities defined as markdown files that extend what the agent can do — without writing code.
+
+#### Skill Format
+
+Skills live in `~/.n8n-desk/skills/` (global) or `~/.n8n-desk/instances/{id}/skills/` (instance-scoped). Each skill is a single markdown file with frontmatter:
+
+```markdown
+---
+name: invoice-processor
+description: Process PDF invoices, extract line items, and produce structured output
+triggers:
+  - "process invoices"
+  - "extract invoice data"
+  - "parse receipts"
+tools:
+  - read_file
+  - write_file
+  - execute_workflow
+---
+
+## Instructions
+
+You are an invoice processing specialist. When the user asks you to process invoices:
+
+1. Scan the target directory for PDF files
+2. For each PDF, use the 'Extract Invoice Data' workflow to parse it
+3. Compile results into a structured JSON or CSV format
+4. Write the output to the specified location
+
+## Output Format
+
+Always produce a summary table with: invoice number, vendor, date, total, line item count.
+
+## Error Handling
+
+If a PDF fails to parse, log it in a `failed.txt` file and continue with the remaining invoices. Never stop the batch for a single failure.
+```
+
+#### How Skills Work
+
+1. **Discovery** — On agent session start, the skill loader scans skill directories and reads frontmatter
+2. **Matching** — When a user message matches a skill's `triggers` (fuzzy match against description and trigger phrases), the skill's content is injected into the agent's system prompt for that session
+3. **Tool scoping** — If a skill declares `tools`, those tools are made available (or prioritized) for that session
+4. **Composable** — Multiple skills can activate for a single session if the user's intent spans several domains
+5. **No code required** — Adding a new skill is just dropping a `.md` file in the skills directory
+
+#### Skill Directories
+
+| Path | Scope | Use case |
+|---|---|---|
+| `~/.n8n-desk/skills/` | Global — all instances | General-purpose skills (file processing, data transformation, reporting) |
+| `~/.n8n-desk/instances/{id}/skills/` | Per-instance | Instance-specific skills (tied to that instance's workflows or conventions) |
+
+Instance-scoped skills take precedence over global skills with the same name.
+
+#### Built-in Skills
+
+n8n-desk ships with a small set of default skills in the app bundle:
+
+- **workflow-builder** — Guides the Workflow mode agent through n8n's node discovery → type lookup → validate → create flow
+- **data-processor** — Common patterns for reading, transforming, and writing local files (CSV, JSON, XLSX)
+- **error-explainer** — Interprets n8n execution errors and suggests fixes
+
+Users can override built-in skills by placing a file with the same name in their skills directory.
+
+### MCP Server Integration
+
+Beyond the built-in n8n MCP server (which provides the 13 workflow tools), n8n-desk supports connecting **additional MCP servers** to extend agent capabilities. This uses `@langchain/mcp-adapters` to bridge MCP servers into the Deep Agents tool ecosystem.
+
+#### Configuration
+
+MCP servers are declared in `~/.n8n-desk/mcp.json`:
+
+```json
+{
+  "servers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/allowed/dir"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}
+```
+
+#### How MCP Servers Work
+
+1. **Startup** — When an agent session starts, the MCP adapter connects to all configured servers and discovers their tools
+2. **Tool conversion** — Each MCP tool is automatically converted to a LangChain tool with proper schemas
+3. **Availability** — Converted tools are added to the agent's tool set alongside built-in and n8n tools
+4. **Lifecycle** — Server processes are started on first agent session and stopped when the app closes. Crashed servers are restarted automatically
+5. **Per-instance** — Instance-scoped MCP config (`~/.n8n-desk/instances/{id}/mcp.json`) merges with global config
+
+#### Tool Namespacing
+
+To avoid collisions between MCP servers and built-in tools, MCP tools are namespaced: `mcp_{server}_{tool}` (e.g., `mcp_github_create_issue`, `mcp_playwright_navigate`). The agent sees all tools in a flat list with clear names.
+
+### Extensibility Summary
+
+| Extension type | How to add | Format | Requires code? |
+|---|---|---|---|
+| **Skill** | Drop a `.md` file in `~/.n8n-desk/skills/` | Markdown with frontmatter | No |
+| **MCP Server** | Add entry to `~/.n8n-desk/mcp.json` | JSON config | No |
+| **Custom LangChain tool** | Register in agent config (developer) | TypeScript tool definition | Yes |
+
+---
+
 ## What n8n-desk is NOT
 
 - **Not a code runner.** No local execution of Python, Node.js, or shell commands. File read/write is scoped to the working directory only.

@@ -1,0 +1,44 @@
+// Map n8n design tokens to Ionic CSS variables
+// This bridges the n8n visual language with Ionic's theming system
+
+:root {
+  // Primary
+  --ion-color-primary: var(--color--primary);
+  --ion-color-primary-shade: var(--color--primary--shade-1);
+  --ion-color-primary-tint: var(--color--primary--tint-1);
+
+  // Success
+  --ion-color-success: var(--color--success);
+  --ion-color-success-shade: var(--color--success--shade-1);
+  --ion-color-success-tint: var(--color--success--tint-1);
+
+  // Warning
+  --ion-color-warning: var(--color--warning);
+  --ion-color-warning-shade: var(--color--warning--shade-1);
+  --ion-color-warning-tint: var(--color--warning--tint-1);
+
+  // Danger
+  --ion-color-danger: var(--color--danger);
+  --ion-color-danger-shade: var(--color--danger--shade-1);
+  --ion-color-danger-tint: var(--color--danger--tint-1);
+
+  // Background & text
+  --ion-background-color: var(--color--background);
+  --ion-text-color: var(--color--text);
+
+  // Typography
+  --ion-font-family: 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    Helvetica, Arial, sans-serif;
+
+  // Toolbar
+  --ion-toolbar-background: var(--color--foreground);
+  --ion-toolbar-color: var(--color--text--shade-1);
+
+  // Tab bar
+  --ion-tab-bar-background: var(--color--foreground);
+  --ion-tab-bar-color: var(--color--text--tint-1);
+  --ion-tab-bar-color-selected: var(--color--primary);
+
+  // Item
+  --ion-item-background: transparent;
+}

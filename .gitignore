@@ -1,1 +1,54 @@
-/n8n-master
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+electron/dist/
+electron/out/
+out/
+
+# n8n reference (read-only copy)
+n8n-master/
+
+# Capacitor native projects
+ios/
+android/
+
+# Environment & secrets
+.env
+.env.*
+*.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# TypeScript
+*.tsbuildinfo
+
+# Test & coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Electron Forge
+.webpack/
+.erb/
+
+# Capacitor
+capacitor-*.tgz
+
+# User data (should never be committed)
+.n8n-desk/
