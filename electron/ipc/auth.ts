@@ -16,6 +16,7 @@ import {
   generateInstanceId,
 } from '../oauth'
 import { startOAuthRedirectListener } from '../oauth-redirect'
+import { syncCookieToChromium } from '../cookie-sync'
 
 const BASE_DIR = path.join(os.homedir(), '.n8n-desk')
 
@@ -523,6 +524,9 @@ export function registerAuthHandlers(): void {
         } else {
           await fs.writeFile(sessionFilePath, sessionData, { encoding: 'utf-8', mode: 0o600 })
         }
+
+        // Sync to Chromium cookie store for WebSocket upgrade requests
+        await syncCookieToChromium(url, sessionToken)
 
         // Build user profile from login response
         const userProfile = {

@@ -2,6 +2,7 @@ import { ipcMain, safeStorage } from 'electron'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
+import { syncCookieToChromium } from '../cookie-sync'
 
 const BASE_DIR = path.join(os.homedir(), '.n8n-desk')
 
@@ -53,6 +54,9 @@ async function handleCookieRefresh(url: string, setCookieHeaders: string[]): Pro
           } else {
             await fs.writeFile(sessionFilePath, sessionData, { encoding: 'utf-8', mode: 0o600 })
           }
+
+          // Sync to Chromium cookie store for WebSocket upgrade requests
+          await syncCookieToChromium(config.url, newToken)
           break
         }
       } catch {
