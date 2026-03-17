@@ -30,8 +30,18 @@
     "lucide-vue-next": "^0.577.0",
     "pinia": "^2.2.0",
     "vue": "^3.5.0",
+    "@langchain/anthropic": "^0.3.0",
+    "@langchain/core": "^0.3.0",
+    "@langchain/langgraph": "^0.2.0",
+    "@langchain/ollama": "^0.1.0",
+    "@langchain/openai": "^0.3.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@n8n_io/n8n-demo-component": "^1.0.0",
+    "deepagents": "^0.1.0",
+    "langchain": "^0.3.0",
     "vue-i18n": "^11.3.0",
-    "vue-router": "^4.4.0"
+    "vue-router": "^4.4.0",
+    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.1",
