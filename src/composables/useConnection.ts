@@ -1,5 +1,8 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { ConnectionStatus } from '@/types/connection'
+
+/** WebSocket-specific connection status */
+export type WsStatus = 'connected' | 'reconnecting' | 'disconnected'
 
 /**
  * Fetch that bypasses CORS by routing through Electron's main process.
@@ -18,9 +21,26 @@ async function healthFetch(url: string): Promise<boolean> {
   }
 }
 
+/** Priority order for picking the worst status */
+const STATUS_PRIORITY: Record<ConnectionStatus, number> = {
+  disconnected: 0,
+  reconnecting: 1,
+  connected: 2,
+}
+
 export function useConnection() {
-  const status = ref<ConnectionStatus>('disconnected')
+  const healthStatus = ref<ConnectionStatus>('disconnected')
+  const wsStatus = ref<WsStatus>('disconnected')
   const lastChecked = ref<string | null>(null)
+
+  /** Combined status — reflects the worst of health + WebSocket sources */
+  const status = computed<ConnectionStatus>(() => {
+    const healthPri = STATUS_PRIORITY[healthStatus.value]
+    const wsPri = STATUS_PRIORITY[wsStatus.value]
+    const worst = Math.min(healthPri, wsPri)
+    return (Object.entries(STATUS_PRIORITY) as [ConnectionStatus, number][])
+      .find(([, v]) => v === worst)![0]
+  })
 
   let healthInterval: ReturnType<typeof setInterval> | null = null
   let currentBaseUrl: string | null = null
@@ -39,12 +59,16 @@ export function useConnection() {
     lastChecked.value = new Date().toISOString()
 
     if (reachable) {
-      status.value = 'connected'
-    } else if (status.value === 'connected') {
-      status.value = 'reconnecting'
+      healthStatus.value = 'connected'
+    } else if (healthStatus.value === 'connected') {
+      healthStatus.value = 'reconnecting'
     } else {
-      status.value = 'disconnected'
+      healthStatus.value = 'disconnected'
     }
+  }
+
+  function setWsStatus(newStatus: WsStatus): void {
+    wsStatus.value = newStatus
   }
 
   function startMonitoring(baseUrl: string): void {
@@ -66,19 +90,20 @@ export function useConnection() {
       healthInterval = null
     }
     currentBaseUrl = null
-    status.value = 'disconnected'
+    healthStatus.value = 'disconnected'
+    wsStatus.value = 'disconnected'
   }
 
   // Listen to browser online/offline events for fast hints
   function handleOnline(): void {
     if (currentBaseUrl) {
-      status.value = 'reconnecting'
+      healthStatus.value = 'reconnecting'
       void performCheck()
     }
   }
 
   function handleOffline(): void {
-    status.value = 'disconnected'
+    healthStatus.value = 'disconnected'
   }
 
   // Resume polling when tab becomes visible
@@ -103,9 +128,12 @@ export function useConnection() {
 
   return {
     status,
+    healthStatus,
+    wsStatus,
     lastChecked,
     startMonitoring,
     stopMonitoring,
     checkHealth,
+    setWsStatus,
   }
 }
