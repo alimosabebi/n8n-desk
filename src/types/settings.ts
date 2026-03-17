@@ -8,3 +8,27 @@ export interface AppSettings {
   lastMode: AppMode
   locale: SupportedLocale
 }
+
+// --- Agent Backend ---
+
+export type AgentBackend = 'claude-sdk' | 'deep-agents'
+
+// --- LLM Provider ---
+
+export type LlmProvider = 'anthropic' | 'openai' | 'ollama'
+
+export interface ClaudeSdkConfig {
+  backend: 'claude-sdk'
+  apiKey: string
+  model: string
+}
+
+export interface DeepAgentsConfig {
+  backend: 'deep-agents'
+  provider: LlmProvider
+  model: string
+  apiKey?: string
+  ollamaBaseUrl?: string
+}
+
+export type LlmConfig = ClaudeSdkConfig | DeepAgentsConfig

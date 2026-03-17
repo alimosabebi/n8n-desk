@@ -1,8 +1,68 @@
-export interface AgentEvent {
-  type: 'text_chunk' | 'tool_call' | 'tool_result' | 'todo_update' | 'error' | 'done'
+// --- Agent Event Discriminated Union ---
+
+export interface AgentEventBase {
   sessionId: string
-  data: unknown
 }
+
+export interface AgentTextChunkEvent extends AgentEventBase {
+  type: 'text_chunk'
+  data: { text: string }
+}
+
+export interface AgentToolCallStartEvent extends AgentEventBase {
+  type: 'tool_call_start'
+  data: { id: string; name: string; args: Record<string, unknown> }
+}
+
+export interface AgentToolCallResultEvent extends AgentEventBase {
+  type: 'tool_call_result'
+  data: { id: string; name: string; result: unknown; success: boolean; error?: string }
+}
+
+export interface AgentApprovalRequiredEvent extends AgentEventBase {
+  type: 'approval_required'
+  data: { id: string; toolName: string; args: Record<string, unknown>; description: string }
+}
+
+export interface AgentApprovalResolvedEvent extends AgentEventBase {
+  type: 'approval_resolved'
+  data: { id: string; decision: 'approve' | 'reject' }
+}
+
+export interface AgentTodoUpdateEvent extends AgentEventBase {
+  type: 'todo_update'
+  data: { todos: AgentTodo[] }
+}
+
+export interface AgentErrorEvent extends AgentEventBase {
+  type: 'error'
+  data: { message: string; code?: string }
+}
+
+export interface AgentDoneEvent extends AgentEventBase {
+  type: 'done'
+  data: { reason: 'completed' | 'cancelled' | 'error' }
+}
+
+export type AgentEvent =
+  | AgentTextChunkEvent
+  | AgentToolCallStartEvent
+  | AgentToolCallResultEvent
+  | AgentApprovalRequiredEvent
+  | AgentApprovalResolvedEvent
+  | AgentTodoUpdateEvent
+  | AgentErrorEvent
+  | AgentDoneEvent
+
+// --- Agent Todos ---
+
+export interface AgentTodo {
+  id: string
+  title: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+}
+
+// --- Agent Meta ---
 
 export interface AgentMeta {
   id: string
@@ -13,10 +73,32 @@ export interface AgentMeta {
   pinned: boolean
 }
 
+// --- Agent Tool Call ---
+
 export interface AgentToolCall {
   id: string
   name: string
   args: Record<string, unknown>
-  status: 'pending' | 'running' | 'completed' | 'failed'
+  status: 'pending' | 'running' | 'awaiting_approval' | 'completed' | 'failed'
   result?: unknown
+}
+
+// --- Workflow Types ---
+
+export interface WorkflowJson {
+  id?: string
+  name: string
+  nodes: Record<string, unknown>[]
+  connections: Record<string, unknown>
+  settings?: Record<string, unknown>
+  staticData?: unknown
+  tags?: string[]
+  active?: boolean
+}
+
+export interface WorkflowPreviewData {
+  workflowId: string
+  name: string
+  workflow: WorkflowJson
+  theme?: 'light' | 'dark'
 }
