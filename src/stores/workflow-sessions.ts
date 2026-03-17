@@ -79,8 +79,7 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
 
     sessions.value.unshift(meta)
     await localStorageService.writeJson(indexPath(currentInstanceId), sessions.value)
-    // Create empty JSONL file
-    await localStorageService.writeJson(sessionFilePath(currentInstanceId, id), '')
+    // JSONL file will be created on first appendJsonl call — no need to pre-create
 
     await selectSession(id)
     return id
@@ -155,6 +154,14 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
   /**
    * Handle an agent event and dispatch by type.
    */
+  function persistMessage(message: SessionMessage): void {
+    if (!currentInstanceId || !activeSessionId.value) return
+    void localStorageService.appendJsonl(
+      sessionFilePath(currentInstanceId, activeSessionId.value),
+      message
+    )
+  }
+
   function handleAgentEvent(event: AgentEvent): void {
     switch (event.type) {
       case 'text_chunk': {
@@ -163,12 +170,15 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
         if (last && last.role === 'assistant') {
           last.content += event.data.text
         } else {
-          messages.value.push({
+          const msg: SessionMessage = {
             id: `msg_${Date.now()}`,
             role: 'assistant',
             content: event.data.text,
             ts: new Date().toISOString(),
-          })
+          }
+          messages.value.push(msg)
+          // Persist new assistant message immediately
+          persistMessage(msg)
         }
         break
       }
@@ -181,14 +191,16 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
         }
         toolCalls.value.push(tc)
 
-        // Add a tool message to the conversation
-        messages.value.push({
+        // Add a tool message to the conversation and persist
+        const toolMsg: SessionMessage = {
           id: `msg_${Date.now()}`,
           role: 'tool',
           content: '',
           ts: new Date().toISOString(),
           meta: { toolCallId: event.data.id, toolName: event.data.name, status: 'running' },
-        })
+        }
+        messages.value.push(toolMsg)
+        persistMessage(toolMsg)
         break
       }
       case 'tool_call_result': {
@@ -198,7 +210,7 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
           tc.result = event.data.result
         }
 
-        // Update the tool message
+        // Update the tool message and persist the updated version
         const toolMsg = [...messages.value].reverse().find(
           (m) => m.meta && (m.meta as Record<string, unknown>).toolCallId === event.data.id
         )
@@ -211,6 +223,7 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
             status: event.data.success ? 'completed' : 'failed',
             error: event.data.error,
           }
+          persistMessage(toolMsg)
         }
         break
       }
@@ -235,25 +248,26 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
         break
       }
       case 'error': {
-        messages.value.push({
+        const errorMsg: SessionMessage = {
           id: `msg_${Date.now()}`,
           role: 'system',
           content: event.data.message,
           ts: new Date().toISOString(),
           meta: { error: true, code: event.data.code },
-        })
+        }
+        messages.value.push(errorMsg)
+        persistMessage(errorMsg)
         isAgentRunning.value = false
         break
       }
       case 'done': {
         isAgentRunning.value = false
-        // Persist the final assistant message if there is one
+        // Persist the final assistant message (accumulated text chunks)
         const lastMsg = messages.value[messages.value.length - 1]
-        if (lastMsg && lastMsg.role === 'assistant' && currentInstanceId && activeSessionId.value) {
-          void localStorageService.appendJsonl(
-            sessionFilePath(currentInstanceId, activeSessionId.value),
-            lastMsg
-          )
+        if (lastMsg && lastMsg.role === 'assistant') {
+          // The assistant message was persisted on creation but text was accumulated,
+          // so persist the final version with complete content
+          persistMessage(lastMsg)
         }
         break
       }
