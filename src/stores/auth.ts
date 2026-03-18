@@ -14,6 +14,7 @@ function keychainKey(instanceId: string): string {
 export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref<string | null>(null)
   const sessionToken = ref<string | null>(null)
+  const browserId = ref<string | null>(null)
   const userRole = ref<UserRole>('unknown')
   const scopes = ref<string[]>([])
   const expiresAt = ref<string | null>(null)
@@ -64,6 +65,9 @@ export const useAuthStore = defineStore('auth', () => {
       if (meta.hasSessionToken) {
         sessionToken.value = await window.n8nDesk.auth.getSessionToken(instanceId)
       }
+
+      // Load browser-id for REST API CSRF header
+      browserId.value = await window.n8nDesk.auth.getBrowserId(instanceId)
     }
   }
 
@@ -103,7 +107,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * Sign in with email+password to get REST API session access.
-   * This is separate from MCP OAuth — gives access to /api/v1/* endpoints.
+   * This is separate from MCP OAuth — gives access to /rest/* and /chat/* endpoints.
    */
   async function credentialLogin(instanceId: string, credentials: { email: string; password: string; mfaCode?: string }): Promise<CredentialLoginResult> {
     if (!window.n8nDesk) {
@@ -116,6 +120,8 @@ export const useAuthStore = defineStore('auth', () => {
       userProfile.value = result.userProfile
       // Load the session token that was just stored
       sessionToken.value = await window.n8nDesk.auth.getSessionToken(instanceId)
+      // Load browser-id (created during credential login)
+      browserId.value = await window.n8nDesk.auth.getBrowserId(instanceId)
     }
 
     return result
@@ -161,6 +167,7 @@ export const useAuthStore = defineStore('auth', () => {
   function reset(): void {
     accessToken.value = null
     sessionToken.value = null
+    browserId.value = null
     userRole.value = 'unknown'
     scopes.value = []
     expiresAt.value = null
@@ -171,6 +178,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken,
     sessionToken,
+    browserId,
     sessionExpired,
     userRole,
     userProfile,

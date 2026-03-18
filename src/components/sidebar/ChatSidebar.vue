@@ -1,77 +1,60 @@
 <script setup lang="ts">
 import {
-  IonButton, IonSearchbar,
-  IonList, IonItem, IonLabel, IonListHeader, IonAvatar,
+  IonSearchbar,
 } from '@ionic/vue'
-import { Plus, Bot } from 'lucide-vue-next'
-import { ref, computed } from 'vue'
+import { Plus, Search } from 'lucide-vue-next'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SessionList from './SessionList.vue'
-import { mockChatSessions, mockAgents } from '@/mocks/sidebar'
+import { useChatStore } from '@/stores/chat'
+import { useChatHub } from '@/composables/useChatHub'
 
 const { t } = useI18n()
+const chatStore = useChatStore()
+const chatHub = useChatHub()
 const searchQuery = ref('')
-const activeSessionId = ref<string | null>(null)
-
-const pinnedAgents = computed(() => mockAgents.filter((a) => a.pinned))
+const searchVisible = ref(false)
 
 function newChat() {
-  // TODO: create new chat session
+  chatStore.preparePendingChat()
 }
 
-function openAgentsBrowser() {
-  // TODO: open agents browser modal/view
-}
-
-function selectAgent(agentId: string) {
-  // TODO: start chat with agent
-  console.log('Start chat with agent:', agentId)
-}
+onMounted(() => {
+  chatHub.connect()
+  chatHub.loadAgents()
+  // Sync local sessions with server to pick up generated titles
+  chatStore.syncSessionsFromServer()
+})
 
 function selectSession(sessionId: string) {
-  activeSessionId.value = sessionId
+  chatStore.switchSession(sessionId)
+}
+
+async function renameSession(sessionId: string, newTitle: string) {
+  await chatStore.renameSession(sessionId, newTitle)
+}
+
+async function deleteSession(sessionId: string) {
+  await chatStore.deleteSession(sessionId)
 }
 </script>
 
 <template>
   <div class="chat-sidebar">
-    <!-- Action Buttons -->
-    <div class="sidebar-section sidebar-actions">
-      <ion-button expand="block" class="action-btn action-btn--primary" @click="newChat">
-        <Plus :size="18" slot="start" />
-        {{ t('sidebar.newChat') }}
-      </ion-button>
-      <ion-button expand="block" fill="outline" class="action-btn action-btn--secondary" @click="openAgentsBrowser">
-        <Bot :size="18" slot="start" />
-        {{ t('sidebar.agents') }}
-      </ion-button>
+    <!-- Action Items -->
+    <div class="sidebar-actions">
+      <button class="sidebar-action-btn" @click="newChat">
+        <Plus :size="16" />
+        <span>{{ t('sidebar.newChat') }}</span>
+      </button>
+      <button class="sidebar-action-btn" @click="searchVisible = !searchVisible">
+        <Search :size="16" />
+        <span>{{ t('sidebar.searchChats').replace('...', '') }}</span>
+      </button>
     </div>
 
-    <!-- Pinned Agents -->
-    <div v-if="pinnedAgents.length" class="sidebar-section pinned-section">
-      <ion-list-header>
-        <ion-label>{{ t('sidebar.pinned') }}</ion-label>
-      </ion-list-header>
-      <ion-list lines="none" class="pinned-list">
-        <ion-item
-          v-for="agent in pinnedAgents"
-          :key="agent.id"
-          button
-          class="pinned-item"
-          @click="selectAgent(agent.id)"
-        >
-          <ion-avatar slot="start" class="agent-avatar">
-            <div class="agent-avatar-circle" :style="{ background: agent.avatarColor }">
-              {{ agent.avatarInitial }}
-            </div>
-          </ion-avatar>
-          <ion-label>{{ agent.name }}</ion-label>
-        </ion-item>
-      </ion-list>
-    </div>
-
-    <!-- Search -->
-    <div class="sidebar-section">
+    <!-- Search (toggleable) -->
+    <div v-if="searchVisible" class="sidebar-section">
       <ion-searchbar
         v-model="searchQuery"
         :placeholder="t('sidebar.searchChats')"
@@ -81,11 +64,12 @@ function selectSession(sessionId: string) {
 
     <!-- Session List -->
     <SessionList
-      :sessions="mockChatSessions"
-      :active-session-id="activeSessionId"
+      :sessions="chatStore.sortedSessions"
+      :active-session-id="chatStore.activeSessionId"
       :search-query="searchQuery"
-      :list-header="t('sidebar.chats')"
       @select="selectSession"
+      @rename="renameSession"
+      @delete="deleteSession"
     />
   </div>
 </template>
@@ -105,64 +89,29 @@ function selectSession(sessionId: string) {
 .sidebar-actions {
   display: flex;
   flex-direction: column;
-  gap: var(--spacing--3xs);
+  padding: var(--spacing--xs) var(--spacing--xs) 0;
 }
 
-.action-btn {
-  --border-radius: var(--radius--xs);
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: var(--font-weight--medium);
-
-  &--primary {
-    --background: var(--color--primary);
-    --color: var(--color--neutral-white);
-  }
-
-  &--secondary {
-    --border-color: var(--border-color--base);
-    --color: var(--color--text);
-  }
-}
-
-.pinned-section {
-  padding-bottom: 0;
-}
-
-.pinned-list {
-  background: transparent;
-}
-
-.pinned-item {
-  --background: transparent;
-  --min-height: 40px;
-  --padding-start: var(--spacing--xs);
-  --inner-padding-end: var(--spacing--xs);
-  font-size: var(--font-size--sm);
-  border-radius: var(--radius--2xs);
-  margin-bottom: 2px;
-  cursor: pointer;
-
-  &:hover {
-    --background: var(--n8n-desk--surface-raised-bg);
-  }
-}
-
-.agent-avatar {
-  width: 28px;
-  height: 28px;
-}
-
-.agent-avatar-circle {
-  width: 100%;
-  height: 100%;
+.sidebar-action-btn {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  color: var(--color--neutral-white);
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color--text--tint-1);
   font-size: 13px;
-  font-weight: var(--font-weight--bold);
+  font-weight: 400;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background: var(--n8n-desk--surface-raised-bg);
+    color: var(--color--text);
+  }
 }
 
 ion-searchbar {

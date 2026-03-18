@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import type { Instance } from '@/types/instance'
 import { localStorageService } from '@/services/local-storage'
 import { useSettingsStore } from './settings'
+import { useChatStore } from './chat'
 
 const INSTANCES_INDEX_PATH = 'instances/index.json'
 
@@ -104,7 +105,15 @@ export const useInstancesStore = defineStore('instances', () => {
   }
 
   async function setActive(id: string): Promise<void> {
+    const previousId = activeInstanceId.value
     activeInstanceId.value = id
+
+    // Reset chat store on instance switch to clear stale data
+    if (previousId !== null && previousId !== id) {
+      const chatStore = useChatStore()
+      chatStore.reset()
+    }
+
     const settingsStore = useSettingsStore()
     settingsStore.defaultInstanceId = id
     await settingsStore.save()

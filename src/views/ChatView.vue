@@ -1,14 +1,10 @@
 <script setup lang="ts">
-import { IonPage, IonContent } from '@ionic/vue'
-import { useI18n } from 'vue-i18n'
-
-const { t } = useI18n()
+import { IonPage } from '@ionic/vue'
+import ChatWindow from '@/components/chat/ChatWindow.vue'
 </script>
 
 <template>
   <ion-page>
-    <ion-content class="ion-padding">
-      <p>{{ t('views.chatComingSoon') }}</p>
-    </ion-content>
+    <ChatWindow />
   </ion-page>
 </template>

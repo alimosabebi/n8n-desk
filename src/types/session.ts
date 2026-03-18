@@ -3,9 +3,17 @@ export interface SessionMeta {
   title: string
   agentId?: string
   agentName?: string
+  agentIcon?: { type: string; value: string } | null
   createdAt: string
   updatedAt: string
   messageCount: number
+}
+
+export interface ChatSessionMeta extends SessionMeta {
+  serverSessionId?: string
+  model?: string
+  lastSequenceNumber?: number
+  syncedAt?: string
 }
 
 export interface SessionMessage {

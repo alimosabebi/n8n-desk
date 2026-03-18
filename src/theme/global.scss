@@ -421,3 +421,35 @@ ion-note {
   color: var(--color--text--tint-1);
   font-size: var(--font-size--2xs);
 }
+
+// ==========================================================================
+// Callout / Banner utility classes
+// Use these instead of ad-hoc error/warning/info styling in components.
+// Designed to match n8n's design language: subtle surface bg + left accent.
+// ==========================================================================
+
+.n8n-callout {
+  padding: var(--spacing--3xs) var(--spacing--sm);
+  border-radius: var(--radius--sm);
+  background: var(--n8n-desk--surface-bg);
+  color: var(--color--text--light);
+  font-size: var(--font-size--2xs);
+  line-height: 1.4;
+  border-left: 3px solid var(--color--text--tint-1);
+
+  &--danger {
+    border-left-color: var(--color--danger);
+  }
+
+  &--warning {
+    border-left-color: var(--color--warning);
+  }
+
+  &--success {
+    border-left-color: var(--color--success);
+  }
+
+  &--info {
+    border-left-color: var(--color--primary);
+  }
+}

@@ -7,8 +7,11 @@ import { useSettingsStore } from './stores/settings'
 import { useInstancesStore } from './stores/instances'
 import { useAuthStore } from './stores/auth'
 import { useTheme } from './composables/useTheme'
+import { useChatStore } from './stores/chat'
+import { n8nHtml } from './directives/n8n-html'
 import { i18n } from './i18n'
 
+import 'highlight.js/styles/github-dark.css'
 import './theme/global.scss'
 
 const pinia = createPinia()
@@ -18,6 +21,7 @@ const app = createApp(App)
   .use(pinia)
   .use(router)
   .use(i18n)
+  .directive('n8n-html', n8nHtml)
 
 // Hydrate stores BEFORE mounting the app so the router guard
 // sees the correct state on the very first navigation.
@@ -32,10 +36,14 @@ async function bootstrap() {
   const instancesStore = useInstancesStore()
   await instancesStore.hydrate()
 
-  // 3. If an active instance exists, hydrate auth state
+  // 3. If an active instance exists, hydrate auth state and chat sessions
   if (instancesStore.activeInstanceId) {
     const authStore = useAuthStore()
     await authStore.hydrate(instancesStore.activeInstanceId)
+
+    // 4. Hydrate chat store (session index) for the active instance
+    const chatStore = useChatStore()
+    await chatStore.hydrate()
   }
 
   // Mark Electron for CSS safe area handling (macOS traffic lights)

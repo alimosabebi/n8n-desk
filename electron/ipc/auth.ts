@@ -1,4 +1,5 @@
 import { ipcMain, shell, safeStorage } from 'electron'
+import crypto from 'crypto'
 import fs from 'fs/promises'
 import path from 'path'
 import os from 'os'
@@ -16,6 +17,7 @@ import {
   generateInstanceId,
 } from '../oauth'
 import { startOAuthRedirectListener } from '../oauth-redirect'
+import { syncCookieToChromium } from '../cookie-sync'
 
 const BASE_DIR = path.join(os.homedir(), '.n8n-desk')
 
@@ -156,6 +158,18 @@ async function deleteSessionToken(instanceId: string): Promise<void> {
     await fs.unlink(path.join(instanceDir(instanceId), 'session.enc'))
   } catch {
     // Already deleted
+  }
+}
+
+async function getOrCreateBrowserId(instanceId: string): Promise<string> {
+  const filePath = path.join(instanceDir(instanceId), 'browser-id')
+  try {
+    return await fs.readFile(filePath, 'utf-8')
+  } catch {
+    const browserId = crypto.randomBytes(32).toString('base64')
+    await ensureDir(path.dirname(filePath))
+    await fs.writeFile(filePath, browserId, { encoding: 'utf-8', mode: 0o600 })
+    return browserId
   }
 }
 
@@ -303,7 +317,7 @@ export function registerAuthHandlers(): void {
         await storeTokens(instanceId, tokenResponse.access_token, tokenResponse.refresh_token)
 
         // 13. Write auth metadata (non-secret)
-        // Note: User profile is not available — MCP OAuth tokens cannot access /api/v1/me
+        // Note: User profile is not available — MCP OAuth tokens cannot access /rest/me
         const authMeta: AuthMetadata = {
           clientId: clientInfo.client_id,
           clientName: 'n8n-desk',
@@ -423,9 +437,38 @@ export function registerAuthHandlers(): void {
     return readSessionToken(instanceId)
   })
 
+  // --- auth:get-browser-id ---
+  // Read the browser-id for an instance (needed for REST API calls).
+  ipcMain.handle('auth:get-browser-id', async (_event, instanceId: string): Promise<string | null> => {
+    try {
+      return await getOrCreateBrowserId(instanceId)
+    } catch {
+      return null
+    }
+  })
+
+  // --- auth:sync-cookie ---
+  // Re-sync the n8n-auth session cookie to Chromium's cookie store.
+  // Must be called before WebSocket connections so the upgrade request includes the cookie.
+  ipcMain.handle('auth:sync-cookie', async (_event, instanceId: string): Promise<boolean> => {
+    try {
+      const instDir = instanceDir(instanceId)
+      const instanceConfig = await readJson<{ url: string }>(path.join(instDir, 'instance.json'))
+      if (!instanceConfig?.url) return false
+
+      const token = await readSessionToken(instanceId)
+      if (!token) return false
+
+      await syncCookieToChromium(instanceConfig.url, token)
+      return true
+    } catch {
+      return false
+    }
+  })
+
   // --- auth:credential-login ---
   // Signs in with email+password to get a REST API session cookie (n8n-auth JWT).
-  // This is separate from MCP OAuth — gives access to /api/v1/* endpoints.
+  // This is separate from MCP OAuth — gives access to /rest/* and /chat/* endpoints.
   ipcMain.handle(
     'auth:credential-login',
     async (
@@ -451,9 +494,15 @@ export function registerAuthHandlers(): void {
           body.mfaCode = credentials.mfaCode
         }
 
+        // Generate a stable browser-id for this instance (n8n embeds it in the JWT)
+        const browserId = await getOrCreateBrowserId(instanceId)
+
         const response = await fetch(`${url}/rest/login`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'browser-id': browserId,
+          },
           body: JSON.stringify(body),
           redirect: 'manual',
           signal: AbortSignal.timeout(15000),
@@ -523,6 +572,9 @@ export function registerAuthHandlers(): void {
         } else {
           await fs.writeFile(sessionFilePath, sessionData, { encoding: 'utf-8', mode: 0o600 })
         }
+
+        // Sync to Chromium cookie store for WebSocket upgrade requests
+        await syncCookieToChromium(url, sessionToken)
 
         // Build user profile from login response
         const userProfile = {
