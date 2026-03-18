@@ -31,10 +31,26 @@ contextBridge.exposeInMainWorld('n8nDesk', {
       ipcRenderer.invoke('auth:credential-login', instanceId, credentials),
     getSessionToken: (instanceId: string) =>
       ipcRenderer.invoke('auth:get-session-token', instanceId),
+    getBrowserId: (instanceId: string) =>
+      ipcRenderer.invoke('auth:get-browser-id', instanceId),
+    syncCookie: (instanceId: string) =>
+      ipcRenderer.invoke('auth:sync-cookie', instanceId),
   },
   api: {
     fetch: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number }) =>
       ipcRenderer.invoke('api:fetch', url, options),
+  },
+  push: {
+    connect: (instanceId: string, instanceUrl: string) =>
+      ipcRenderer.invoke('push:connect', instanceId, instanceUrl),
+    disconnect: () =>
+      ipcRenderer.invoke('push:disconnect'),
+    onEvent: (callback: (raw: string) => void) => {
+      ipcRenderer.on('push:event', (_event, data) => callback(data))
+    },
+    onStatus: (callback: (status: string) => void) => {
+      ipcRenderer.on('push:status', (_event, status) => callback(status))
+    },
   },
   keychain: {
     get: (key: string) =>

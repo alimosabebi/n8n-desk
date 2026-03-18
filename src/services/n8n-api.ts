@@ -53,12 +53,18 @@ export class N8nApiClient {
     private baseUrl: string,
     private getMcpToken: () => string | null,
     private getSessionToken: () => string | null,
+    private getBrowserId: () => string | null,
     private onRefreshNeeded: () => Promise<boolean>,
     private onSessionExpired?: () => void,
   ) {}
 
   async request<T>(path: string, options?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<T> {
     const response = await this.doFetch(path, options)
+
+    // Network-level error (DNS failure, connection refused, timeout)
+    if (response.status === 0) {
+      throw new N8nApiError(0, response.body || 'Network error: could not reach n8n instance')
+    }
 
     if (response.status === 401 && !this.isRefreshing) {
       const isRestApi = path.startsWith('/rest/') || path.startsWith('/chat/')
@@ -119,6 +125,10 @@ export class N8nApiClient {
 
     if (isRestApi && sessionToken) {
       headers['Cookie'] = `n8n-auth=${sessionToken}`
+      const bid = this.getBrowserId()
+      if (bid) {
+        headers['browser-id'] = bid
+      }
     } else if (mcpToken) {
       headers['Authorization'] = `Bearer ${mcpToken}`
     }
@@ -171,6 +181,7 @@ export function createApiClient(): N8nApiClient | null {
     instance.url,
     () => authStore.accessToken,
     () => authStore.sessionToken,
+    () => authStore.browserId,
     async () => {
       const result = await authStore.refresh(instance.id)
       return result.success

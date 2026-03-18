@@ -1,6 +1,17 @@
 <template>
   <div :class="$style.container">
-    <div :class="$style.inputWrapper">
+    <div v-if="error" :class="$style.errorBar">
+      <span :class="$style.errorText">{{ error }}</span>
+      <button
+        :class="$style.errorClose"
+        type="button"
+        aria-label="Dismiss error"
+        @click="emit('dismissError')"
+      >
+        &times;
+      </button>
+    </div>
+    <div :class="[$style.inputWrapper, error && $style.inputWrapperWithError]">
       <textarea
         ref="textareaRef"
         v-model="message"
@@ -43,11 +54,13 @@ const props = defineProps<{
   isStreaming?: boolean
   isOffline?: boolean
   disabled?: boolean
+  error?: string | null
 }>()
 
 const emit = defineEmits<{
   send: [message: string]
   stop: []
+  dismissError: []
 }>()
 
 const message = ref('')
@@ -102,6 +115,42 @@ watch(() => props.isStreaming, (streaming, prev) => {
   background: var(--n8n-desk--content-bg);
 }
 
+.errorBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  background: var(--color--danger);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 12px 12px 0 0;
+  border: 1px solid var(--color--danger);
+  border-bottom: none;
+}
+
+.errorText {
+  flex: 1;
+  min-width: 0;
+}
+
+.errorClose {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+
+  &:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.15);
+  }
+}
+
 .inputWrapper {
   display: flex;
   align-items: flex-end;
@@ -115,6 +164,12 @@ watch(() => props.isStreaming, (streaming, prev) => {
   &:focus-within {
     border-color: var(--color--primary, #ff6d5a);
   }
+}
+
+.inputWrapperWithError {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top-color: var(--color--danger);
 }
 
 .textarea {

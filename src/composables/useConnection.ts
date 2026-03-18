@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import type { ConnectionStatus } from '@/types/connection'
 
 /** WebSocket-specific connection status */
@@ -21,50 +21,71 @@ async function healthFetch(url: string): Promise<boolean> {
   }
 }
 
-/** Priority order for picking the worst status */
-const STATUS_PRIORITY: Record<ConnectionStatus, number> = {
-  disconnected: 0,
-  reconnecting: 1,
-  connected: 2,
+// --- Shared singleton state ---
+const healthStatus = ref<ConnectionStatus>('disconnected')
+const wsStatus = ref<WsStatus>('disconnected')
+const lastChecked = ref<string | null>(null)
+
+let healthInterval: ReturnType<typeof setInterval> | null = null
+let currentBaseUrl: string | null = null
+let listenersBound = false
+
+/**
+ * Combined status — use health status as primary indicator.
+ * WebSocket status only downgrades if it was previously connected (i.e., it's actually in use).
+ */
+const status = computed<ConnectionStatus>(() => {
+  // If health check passes, we're connected (WebSocket may not be in use yet)
+  return healthStatus.value
+})
+
+async function performCheck(): Promise<void> {
+  if (!currentBaseUrl) return
+  if (document.hidden) return
+
+  const reachable = await healthFetch(`${currentBaseUrl}/healthz`)
+  lastChecked.value = new Date().toISOString()
+
+  if (reachable) {
+    healthStatus.value = 'connected'
+  } else if (healthStatus.value === 'connected') {
+    healthStatus.value = 'reconnecting'
+  } else {
+    healthStatus.value = 'disconnected'
+  }
+}
+
+function handleOnline(): void {
+  if (currentBaseUrl) {
+    healthStatus.value = 'reconnecting'
+    void performCheck()
+  }
+}
+
+function handleOffline(): void {
+  healthStatus.value = 'disconnected'
+}
+
+function handleVisibilityChange(): void {
+  if (!document.hidden && currentBaseUrl) {
+    void performCheck()
+  }
+}
+
+function bindListeners(): void {
+  if (listenersBound) return
+  listenersBound = true
+  window.addEventListener('online', handleOnline)
+  window.addEventListener('offline', handleOffline)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
 }
 
 export function useConnection() {
-  const healthStatus = ref<ConnectionStatus>('disconnected')
-  const wsStatus = ref<WsStatus>('disconnected')
-  const lastChecked = ref<string | null>(null)
-
-  /** Combined status — reflects the worst of health + WebSocket sources */
-  const status = computed<ConnectionStatus>(() => {
-    const healthPri = STATUS_PRIORITY[healthStatus.value]
-    const wsPri = STATUS_PRIORITY[wsStatus.value]
-    const worst = Math.min(healthPri, wsPri)
-    return (Object.entries(STATUS_PRIORITY) as [ConnectionStatus, number][])
-      .find(([, v]) => v === worst)![0]
-  })
-
-  let healthInterval: ReturnType<typeof setInterval> | null = null
-  let currentBaseUrl: string | null = null
+  // Bind global listeners once on first use
+  bindListeners()
 
   async function checkHealth(baseUrl: string): Promise<boolean> {
     return healthFetch(`${baseUrl}/healthz`)
-  }
-
-  async function performCheck(): Promise<void> {
-    if (!currentBaseUrl) return
-
-    // Skip if document is hidden (save resources)
-    if (document.hidden) return
-
-    const reachable = await checkHealth(currentBaseUrl)
-    lastChecked.value = new Date().toISOString()
-
-    if (reachable) {
-      healthStatus.value = 'connected'
-    } else if (healthStatus.value === 'connected') {
-      healthStatus.value = 'reconnecting'
-    } else {
-      healthStatus.value = 'disconnected'
-    }
   }
 
   function setWsStatus(newStatus: WsStatus): void {
@@ -93,38 +114,6 @@ export function useConnection() {
     healthStatus.value = 'disconnected'
     wsStatus.value = 'disconnected'
   }
-
-  // Listen to browser online/offline events for fast hints
-  function handleOnline(): void {
-    if (currentBaseUrl) {
-      healthStatus.value = 'reconnecting'
-      void performCheck()
-    }
-  }
-
-  function handleOffline(): void {
-    healthStatus.value = 'disconnected'
-  }
-
-  // Resume polling when tab becomes visible
-  function handleVisibilityChange(): void {
-    if (!document.hidden && currentBaseUrl) {
-      void performCheck()
-    }
-  }
-
-  onMounted(() => {
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-  })
-
-  onUnmounted(() => {
-    stopMonitoring()
-    window.removeEventListener('online', handleOnline)
-    window.removeEventListener('offline', handleOffline)
-    document.removeEventListener('visibilitychange', handleVisibilityChange)
-  })
 
   return {
     status,

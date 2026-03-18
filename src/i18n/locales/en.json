@@ -4,6 +4,12 @@
     "cowork": "Cowork",
     "workflow": "Workflow"
   },
+  "nav": {
+    "back": "Go back",
+    "forward": "Go forward",
+    "toggleSidebar": "Toggle sidebar",
+    "settings": "Settings"
+  },
   "sidebar": {
     "newChat": "New Chat",
     "newTask": "New Task",
@@ -14,6 +20,12 @@
     "searchTasks": "Search tasks...",
     "searchWorkflows": "Search workflows...",
     "noSessionsFound": "No sessions found",
+    "rename": "Rename",
+    "delete": "Delete",
+    "deleteConfirmTitle": "Delete session",
+    "deleteConfirmMessage": "Delete this session? It will be archived for 30 days.",
+    "deleteConfirmButton": "Delete",
+    "cancel": "Cancel",
     "chats": "Chats",
     "tasks": "Tasks",
     "workflows": "Workflows",

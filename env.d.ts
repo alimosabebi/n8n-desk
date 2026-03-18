@@ -18,6 +18,12 @@ interface N8nDeskBridge {
     write: (path: string, data: string) => Promise<void>
     append: (path: string, line: string) => Promise<void>
   }
+  push: {
+    connect: (instanceId: string, instanceUrl: string) => Promise<{ success: boolean; error?: string }>
+    disconnect: () => Promise<void>
+    onEvent: (callback: (raw: string) => void) => void
+    onStatus: (callback: (status: string) => void) => void
+  }
   api: {
     fetch: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string; timeoutMs?: number }) =>
       Promise<{ status: number; headers: Record<string, string>; body: string }>
@@ -28,6 +34,8 @@ interface N8nDeskBridge {
     refresh: (instanceId: string) => Promise<import('./src/types/auth').AuthRefreshResult>
     credentialLogin: (instanceId: string, credentials: { email: string; password: string; mfaCode?: string }) => Promise<import('./src/types/auth').CredentialLoginResult>
     getSessionToken: (instanceId: string) => Promise<string | null>
+    getBrowserId: (instanceId: string) => Promise<string | null>
+    syncCookie: (instanceId: string) => Promise<boolean>
   }
   keychain: {
     get: (key: string) => Promise<string | null>

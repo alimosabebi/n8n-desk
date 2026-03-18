@@ -936,6 +936,7 @@ npx cap open ios    # or android
 - **Do NOT set `mode: 'ios'` globally on `IonicVue`.** Only apply `mode="ios"` on individual components where explicitly required.
 - **Navigation is side menu, never bottom tabs.** Use `IonMenu` + `IonSplitPane` + `IonSegment` for mode switching. No `IonTabs` or `IonTabBar`.
 - **Inputs always use `fill="outline"` and `label-placement="stacked"`** — label above, outlined border. This matches n8n's form style. Applies to `<ion-input>`, `<ion-textarea>`, and `<ion-select>`.
+- **Never use emojis in the UI.** Always use Lucide icons (via `lucide-vue-next`) or SVG icons instead. This applies to all components, empty states, placeholders, and fallbacks. If n8n's API returns emoji data (e.g., agent icons), render the first letter initial as fallback — never display the emoji.
 
 ---
 

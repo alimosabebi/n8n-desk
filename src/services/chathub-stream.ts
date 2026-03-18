@@ -1,4 +1,3 @@
-import ReconnectingWebSocket from 'reconnecting-websocket'
 import type { ConnectionStatus } from '@/types/connection'
 import type { ChatHubPushMessage } from '@/types/chathub'
 
@@ -26,23 +25,22 @@ interface PushEnvelope {
 type ChatHubEventHandler = (event: ChatHubPushMessage) => void
 type StatusChangeHandler = (status: ConnectionStatus) => void
 
-function generatePushRef(): string {
-  return crypto.randomUUID()
-}
-
 /**
- * Manages a persistent WebSocket connection to n8n's /rest/push endpoint.
- * Filters for Chat-Hub events and exposes them via a simple callback API.
+ * Manages the push connection to n8n via the Electron main-process proxy.
  *
- * Uses reconnecting-websocket with exponential backoff (1s→30s).
+ * In Electron: uses IPC push:connect/push:event (main process opens the WebSocket
+ * with the Cookie header — no CORS/SameSite issues).
+ *
+ * In browser dev (no Electron): falls back to direct WebSocket from the renderer.
  */
 export class ChatHubStreamService {
-  private ws: ReconnectingWebSocket | null = null
-  private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private eventHandlers: ChatHubEventHandler[] = []
   private statusHandlers: StatusChangeHandler[] = []
   private _status: ConnectionStatus = 'disconnected'
-  private baseUrl = ''
+  private ipcListenersRegistered = false
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private instanceId = ''
+  private instanceUrl = ''
 
   get status(): ConnectionStatus {
     return this._status
@@ -50,43 +48,27 @@ export class ChatHubStreamService {
 
   /**
    * Connect to a n8n instance's push endpoint.
-   * Closes any existing connection first.
    */
-  connect(baseUrl: string): void {
+  async connect(instanceId: string, instanceUrl: string): Promise<void> {
     this.disconnect()
-    this.baseUrl = baseUrl
+    this.instanceId = instanceId
+    this.instanceUrl = instanceUrl
 
-    const urlProvider = () => {
-      const pushRef = generatePushRef()
-      const wsBase = baseUrl.replace(/^http/, 'ws')
-      return `${wsBase}/rest/push?pushRef=${pushRef}`
+    if (window.n8nDesk?.push) {
+      await this.connectViaIpc(instanceId, instanceUrl)
     }
-
-    this.ws = new ReconnectingWebSocket(urlProvider, [], {
-      minReconnectionDelay: 1000,
-      maxReconnectionDelay: 30000,
-      reconnectionDelayGrowFactor: 2,
-      maxEnqueuedMessages: 0,
-    })
-
-    this.ws.binaryType = 'arraybuffer'
-
-    this.ws.addEventListener('open', this.handleOpen)
-    this.ws.addEventListener('close', this.handleClose)
-    this.ws.addEventListener('error', this.handleError)
-    this.ws.addEventListener('message', this.handleMessage)
   }
 
   /** Disconnect and clean up all resources. */
   disconnect(): void {
-    this.stopHeartbeat()
-    if (this.ws) {
-      this.ws.removeEventListener('open', this.handleOpen)
-      this.ws.removeEventListener('close', this.handleClose)
-      this.ws.removeEventListener('error', this.handleError)
-      this.ws.removeEventListener('message', this.handleMessage)
-      this.ws.close()
-      this.ws = null
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    try {
+      window.n8nDesk?.push?.disconnect()
+    } catch {
+      // Bridge not available yet
     }
     this.setStatus('disconnected')
   }
@@ -115,39 +97,47 @@ export class ChatHubStreamService {
     }
   }
 
-  private readonly handleOpen = (): void => {
-    this.setStatus('connected')
-    this.startHeartbeat()
-  }
+  private async connectViaIpc(instanceId: string, instanceUrl: string): Promise<void> {
+    // Register IPC listeners once
+    if (!this.ipcListenersRegistered) {
+      this.ipcListenersRegistered = true
 
-  private readonly handleClose = (): void => {
-    this.stopHeartbeat()
-    if (this.ws) {
-      // reconnecting-websocket will auto-reconnect
-      this.setStatus('reconnecting')
-    } else {
+      window.n8nDesk!.push.onEvent((raw: string) => {
+        this.handleRawMessage(raw)
+      })
+
+      window.n8nDesk!.push.onStatus((status: string) => {
+        if (status === 'connected') {
+          this.setStatus('connected')
+        } else if (status === 'disconnected') {
+          this.setStatus('disconnected')
+          // Auto-reconnect after 3 seconds
+          this.scheduleReconnect()
+        } else if (status === 'reconnecting') {
+          this.setStatus('reconnecting')
+        }
+      })
+    }
+
+    const result = await window.n8nDesk!.push.connect(instanceId, instanceUrl)
+
+    if (!result.success) {
       this.setStatus('disconnected')
+      this.scheduleReconnect()
     }
   }
 
-  private readonly handleError = (): void => {
-    if (this._status === 'connected') {
-      this.setStatus('reconnecting')
-    }
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer) return
+    if (!this.instanceId || !this.instanceUrl) return
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      void this.connectViaIpc(this.instanceId, this.instanceUrl)
+    }, 3000)
   }
 
-  private readonly handleMessage = (event: MessageEvent): void => {
-    let raw: string
-
-    if (event.data instanceof ArrayBuffer) {
-      const decoder = new TextDecoder()
-      raw = decoder.decode(event.data)
-    } else if (typeof event.data === 'string') {
-      raw = event.data
-    } else {
-      return
-    }
-
+  private handleRawMessage(raw: string): void {
     let envelope: PushEnvelope
     try {
       envelope = JSON.parse(raw) as PushEnvelope
@@ -160,22 +150,6 @@ export class ChatHubStreamService {
     const pushMessage = envelope as unknown as ChatHubPushMessage
     for (const handler of this.eventHandlers) {
       handler(pushMessage)
-    }
-  }
-
-  private startHeartbeat(): void {
-    this.stopHeartbeat()
-    this.heartbeatInterval = setInterval(() => {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'heartbeat' }))
-      }
-    }, 30000)
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval)
-      this.heartbeatInterval = null
     }
   }
 }

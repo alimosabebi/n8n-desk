@@ -1,13 +1,15 @@
-import { ref, computed, onUnmounted } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useInstancesStore } from '@/stores/instances'
 import { ChatHubService } from '@/services/chathub'
 import { ChatHubStreamService } from '@/services/chathub-stream'
 import { createApiClient } from '@/services/n8n-api'
+import { useConnection } from '@/composables/useConnection'
 import type {
   ChatHubConversationModel,
   ChatHubPushMessage,
   ChatModelDto,
+  ChatModelsResponse,
   ChatAttachment,
   ChatSessionId,
   ChatMessageId,
@@ -25,6 +27,10 @@ function getStreamService(): ChatHubStreamService {
   return sharedStreamService
 }
 
+/** Module-level credential cache — shared across all useChatHub() instances */
+let cachedCredsByProvider: Record<string, string | null> = {}
+let cachedCredsByType: Record<string, { id: string; name: string }> = {}
+
 export function useChatHub() {
   const chatStore = useChatStore()
   const instancesStore = useInstancesStore()
@@ -33,7 +39,11 @@ export function useChatHub() {
   const error = ref<string | null>(null)
   const isLoadingAgents = ref(false)
 
-  const isConnected = computed(() => streamStatus.value === 'connected')
+  const isConnected = computed(() => {
+    // Consider connected if health check passes (WebSocket may not be active yet)
+    const conn = useConnection()
+    return conn.healthStatus.value === 'connected' || streamStatus.value === 'connected'
+  })
   const isReconnecting = computed(() => streamStatus.value === 'reconnecting')
   const agents = computed(() => chatStore.agents)
   const isStreaming = computed(() => chatStore.isStreaming)
@@ -127,9 +137,10 @@ export function useChatHub() {
   }
 
   /**
-   * Connect the WebSocket to the active n8n instance.
+   * Connect to the push stream for the active n8n instance.
+   * Uses the main-process WebSocket proxy (bypasses CORS/cookie issues).
    */
-  function connect(): void {
+  async function connect(): Promise<void> {
     const instance = instancesStore.activeInstance
     if (!instance) return
 
@@ -142,7 +153,7 @@ export function useChatHub() {
     unsubEvent = streamService.onEvent(handlePushEvent)
     unsubStatus = streamService.onStatusChange(handleStatusChange)
 
-    streamService.connect(instance.url)
+    await streamService.connect(instance.id, instance.url)
   }
 
   /**
@@ -161,6 +172,8 @@ export function useChatHub() {
 
   /**
    * Load available agents/models from the Chat-Hub API.
+   * Fetches the user's credentials first so LLM provider models
+   * (OpenAI, Anthropic, etc.) are included in the response.
    */
   async function loadAgents(): Promise<ChatModelDto[]> {
     const service = getService()
@@ -173,12 +186,19 @@ export function useChatHub() {
     error.value = null
 
     try {
-      const response = await service.getModels()
+      // Build credentials map so the backend can discover LLM provider models
+      const resolved = await service.buildCredentialsMap()
+      cachedCredsByProvider = resolved.byProvider
+      cachedCredsByType = resolved.byType
+      const rawResponse = await service.getModels(resolved.byProvider)
+
+      // n8n wraps the response in { data: { ... } }
+      const response = (rawResponse as unknown as { data: ChatModelsResponse }).data ?? rawResponse
       const allModels: ChatModelDto[] = []
 
       for (const providerKey of Object.keys(response) as Array<keyof typeof response>) {
         const entry = response[providerKey]
-        if (entry.models) {
+        if (entry?.models?.length) {
           allModels.push(...entry.models)
         }
       }
@@ -230,14 +250,23 @@ export function useChatHub() {
 
     let sessionId = options?.sessionId ?? chatStore.activeSessionId
     if (!sessionId) {
-      // Create a new session with the first message as title
-      const title = message.length > 50 ? `${message.slice(0, 47)}...` : message
-      sessionId = await chatStore.createSession(title)
+      // Create session on first message — title will be updated by pollForTitle after stream
+      const pending = chatStore.pendingAgent
+      const placeholderTitle = pending?.agentName ?? (message.length > 50 ? `${message.slice(0, 47)}...` : message)
+      sessionId = await chatStore.createSession(
+        placeholderTitle,
+        pending?.agentId,
+        pending?.agentName,
+      )
+      chatStore.clearPending()
     }
+
+    // Generate a UUID for the message (n8n requires UUIDs)
+    const messageId = crypto.randomUUID()
 
     // Append the user message to local state
     const userMessage: SessionMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      id: messageId,
       role: 'user',
       content: message,
       ts: new Date().toISOString(),
@@ -248,13 +277,20 @@ export function useChatHub() {
     const msgs = chatStore.messagesBySession.get(sessionId) ?? []
     const previousMessageId = msgs.length > 1 ? msgs[msgs.length - 2]?.id : undefined
 
+    // Resolve agent name for the session
+    const session = chatStore.activeSession
+    const agentName = session?.agentName
+
     try {
       await service.sendMessage({
         sessionId,
+        messageId,
         message,
         model,
         previousMessageId,
         attachments: options?.attachments,
+        agentName,
+        credentials: cachedCredsByType,
       })
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to send message'
@@ -283,6 +319,7 @@ export function useChatHub() {
         message: newContent,
         model,
         attachments,
+        credentials: cachedCredsByType,
       })
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to edit message'
@@ -307,6 +344,7 @@ export function useChatHub() {
         sessionId,
         messageId,
         model,
+        credentials: cachedCredsByType,
       })
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to regenerate message'
@@ -323,14 +361,27 @@ export function useChatHub() {
     const targetSessionId = sessionId ?? chatStore.activeSessionId
     if (!targetSessionId) return
 
+    // Find the active streaming message ID for this session
+    const stream = chatStore.activeStreams.get(targetSessionId)
+    if (!stream?.messageId) return
+
     error.value = null
 
     try {
-      await service.stopGeneration(targetSessionId)
+      await service.stopGeneration(targetSessionId, stream.messageId)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to stop generation'
     }
   }
+
+  function clearError(): void {
+    error.value = null
+  }
+
+  // Clear error on session switch
+  watch(() => chatStore.activeSessionId, () => {
+    error.value = null
+  })
 
   // Clean up on component unmount
   onUnmounted(() => {
@@ -361,5 +412,6 @@ export function useChatHub() {
     editMessage,
     regenerateMessage,
     stopGeneration,
+    clearError,
   }
 }

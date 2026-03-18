@@ -3,6 +3,7 @@ export interface SessionMeta {
   title: string
   agentId?: string
   agentName?: string
+  agentIcon?: { type: string; value: string } | null
   createdAt: string
   updatedAt: string
   messageCount: number

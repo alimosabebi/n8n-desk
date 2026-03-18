@@ -75,27 +75,39 @@ export function registerApiProxyHandlers(): void {
   handlersRegistered = true
 
   ipcMain.handle('api:fetch', async (_event, url: string, options?: FetchOptions): Promise<FetchResult> => {
-    const response = await fetch(url, {
-      method: options?.method ?? 'GET',
-      headers: options?.headers,
-      body: options?.body,
-      redirect: 'manual',
-      signal: AbortSignal.timeout(options?.timeoutMs ?? 30000),
-    })
+    try {
+      const response = await fetch(url, {
+        method: options?.method ?? 'GET',
+        headers: options?.headers,
+        body: options?.body,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(options?.timeoutMs ?? 30000),
+      })
 
-    const headers: Record<string, string> = {}
-    response.headers.forEach((value, key) => {
-      headers[key] = value
-    })
+      const headers: Record<string, string> = {}
+      response.headers.forEach((value, key) => {
+        headers[key] = value
+      })
 
-    const body = await response.text()
+      const body = await response.text()
 
-    // Auto-capture refreshed session cookies from n8n (best-effort, non-blocking)
-    const setCookieHeaders = response.headers.getSetCookie?.() ?? []
-    if (setCookieHeaders.length > 0) {
-      void handleCookieRefresh(url, setCookieHeaders)
+      // Auto-capture refreshed session cookies from n8n (best-effort, non-blocking)
+      const setCookieHeaders = response.headers.getSetCookie?.() ?? []
+      if (setCookieHeaders.length > 0) {
+        void handleCookieRefresh(url, setCookieHeaders)
+      }
+
+      return { status: response.status, headers, body }
+    } catch (error) {
+      // Network errors (DNS failure, connection refused, timeout) — return as a
+      // structured response so the renderer can handle them uniformly
+      const message = error instanceof Error ? error.message : String(error)
+      const isTimeout = error instanceof DOMException && error.name === 'TimeoutError'
+      return {
+        status: 0,
+        headers: {},
+        body: JSON.stringify({ error: message, code: isTimeout ? 'TIMEOUT' : 'NETWORK_ERROR' }),
+      }
     }
-
-    return { status: response.status, headers, body }
   })
 }

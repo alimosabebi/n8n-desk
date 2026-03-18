@@ -16,6 +16,10 @@ export async function syncCookieToChromium(instanceUrl: string, sessionToken: st
     path: '/',
     httpOnly: true,
     secure: isSecure,
-    sameSite: 'lax',
+    // 'no_restriction' = SameSite=None — required for cross-origin WebSocket
+    // connections (renderer at localhost/file:// → n8n instance domain)
+    sameSite: 'no_restriction',
+    // Persist across app restarts (session cookies are lost on quit)
+    expirationDate: Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, // 30 days
   })
 }

@@ -36,7 +36,8 @@
     "sanitize-html": "^2.14.0",
     "vue": "^3.5.0",
     "vue-i18n": "^11.3.0",
-    "vue-router": "^4.4.0"
+    "vue-router": "^4.4.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@capacitor/cli": "^6.2.1",
@@ -46,6 +47,7 @@
     "@types/markdown-it-link-attributes": "^3.0.5",
     "@types/node": "^20.0.0",
     "@types/sanitize-html": "^2.13.0",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
     "@vitejs/plugin-vue": "^5.0.0",

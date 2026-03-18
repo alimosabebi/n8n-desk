@@ -5,6 +5,7 @@ import { registerAuthHandlers } from './ipc/auth'
 import { registerAgentHandlers } from './ipc/agent'
 import { registerKeychainHandlers } from './ipc/keychain'
 import { registerApiProxyHandlers } from './ipc/api-proxy'
+import { registerPushProxyHandlers } from './ipc/push-proxy'
 import { handleCallbackUrl } from './oauth-redirect'
 
 let mainWindow: BrowserWindow | null = null
@@ -57,6 +58,7 @@ if (!gotTheLock) {
     registerAuthHandlers()
     registerKeychainHandlers()
     registerApiProxyHandlers()
+    registerPushProxyHandlers()
 
     createWindow()
   })

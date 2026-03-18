@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { IonContent } from '@ionic/vue'
+import { MessageSquare } from 'lucide-vue-next'
 import ChatMessage from './ChatMessage.vue'
 import { useChatStore } from '@/stores/chat'
 
@@ -40,9 +41,9 @@ const isEmpty = computed(() => messages.value.length === 0)
 
 async function scrollToBottom(smooth = true): Promise<void> {
   await nextTick()
-  const el = contentRef.value?.$el as HTMLElement | undefined
-  if (!el) return
-  const scrollEl = await contentRef.value?.getScrollElement()
+  const ionContent = contentRef.value?.$el as HTMLIonContentElement | undefined
+  if (!ionContent?.getScrollElement) return
+  const scrollEl = await ionContent.getScrollElement()
   if (!scrollEl) return
   scrollEl.scrollTo({
     top: scrollEl.scrollHeight,
@@ -58,7 +59,8 @@ function handleScroll(event: CustomEvent): void {
   const target = (contentRef.value?.$el as HTMLElement)?.querySelector('.inner-scroll') as HTMLElement | null
   if (!target) {
     // Fallback: use IonContent scroll API
-    contentRef.value?.getScrollElement().then((el) => {
+    const ionEl = contentRef.value?.$el as HTMLIonContentElement | undefined
+    ionEl?.getScrollElement?.()?.then((el: HTMLElement) => {
       if (!el) return
       const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
       userScrolledUp.value = distanceFromBottom > 100
@@ -120,7 +122,7 @@ defineExpose({ scrollToBottom })
   >
     <!-- Empty state -->
     <div v-if="isEmpty" :class="$style.emptyState">
-      <div :class="$style.emptyIcon">💬</div>
+      <div :class="$style.emptyIcon"><MessageSquare :size="32" /></div>
       <p :class="$style.emptyTitle">Start a conversation</p>
       <p :class="$style.emptySubtitle">
         Send a message to begin chatting with your agent.

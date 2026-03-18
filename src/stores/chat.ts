@@ -11,8 +11,11 @@ import type {
   ChatHubMessageEdited,
   ChatHubExecutionBegin,
   ChatHubExecutionEnd,
+  ChatHubConversationModel,
 } from '@/types/chathub'
 import { localStorageService } from '@/services/local-storage'
+import { ChatHubService } from '@/services/chathub'
+import { createApiClient } from '@/services/n8n-api'
 import { useInstancesStore } from './instances'
 
 function sessionIndexPath(instanceId: string): string {
@@ -27,13 +30,9 @@ function archivePath(instanceId: string, sessionId: string): string {
   return `instances/${instanceId}/sessions/chat/.archive/${sessionId}.jsonl`
 }
 
-function generateId(prefix: string, length: number): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  let result = `${prefix}_`
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return result
+function generateId(_prefix?: string, _length?: number): string {
+  // n8n Chat-Hub requires UUIDs for session and message IDs
+  return crypto.randomUUID()
 }
 
 export interface StreamState {
@@ -49,11 +48,18 @@ export const useChatStore = defineStore('chat', () => {
   const sessions = ref<ChatSessionMeta[]>([])
   const activeSessionId = ref<string | null>(null)
 
+  // Pending new chat — input is shown but no session created yet
+  const pendingNewChat = ref(false)
+  const pendingAgent = ref<{ agentId: string; agentName: string; model: ChatHubConversationModel } | null>(null)
+
   // Messages keyed by sessionId
   const messagesBySession = ref<Map<string, SessionMessage[]>>(new Map())
 
   // Agents/models discovered from Chat-Hub
   const agents = ref<ChatModelDto[]>([])
+
+  // Currently selected model/agent for sending messages
+  const selectedModel = ref<ChatHubConversationModel | null>(null)
 
   // Streaming state — active streams keyed by sessionId
   const activeStreams = ref<Map<string, StreamState>>(new Map())
@@ -100,6 +106,12 @@ export const useChatStore = defineStore('chat', () => {
     await localStorageService.writeJson(sessionIndexPath(instanceId), sessions.value)
   }
 
+  function getChatHubService(): ChatHubService | null {
+    const client = createApiClient()
+    if (!client) return null
+    return new ChatHubService(client)
+  }
+
   // Core actions
   async function hydrate(): Promise<void> {
     const instanceId = getInstanceId()
@@ -125,43 +137,86 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  /**
+   * Sync local session list with the server.
+   * Fetches all sessions from the server and merges titles, agent info, etc.
+   * Called after hydrate to ensure local data has up-to-date server titles.
+   */
+  async function syncSessionsFromServer(): Promise<void> {
+    const service = getChatHubService()
+    if (!service) return
+
+    try {
+      const response = await service.listSessions({ limit: 100 })
+      const serverSessions = response.data ?? []
+
+      // Build lookup by session ID
+      const serverById = new Map(serverSessions.map((s) => [s.id, s]))
+
+      let changed = false
+      for (const local of sessions.value) {
+        const serverId = local.serverSessionId ?? local.id
+        const server = serverById.get(serverId)
+        if (!server) continue
+
+        // Update title from server if it's a real title (not "New Chat")
+        if (server.title && server.title !== 'New Chat' && server.title !== local.title) {
+          local.title = server.title
+          changed = true
+        }
+        if (server.agentName && server.agentName !== local.agentName) {
+          local.agentName = server.agentName
+          changed = true
+        }
+        if (server.agentIcon && !local.agentIcon) {
+          local.agentIcon = server.agentIcon
+          changed = true
+        }
+        if (server.updatedAt && server.updatedAt !== local.updatedAt) {
+          local.updatedAt = server.updatedAt
+          changed = true
+        }
+        local.syncedAt = new Date().toISOString()
+      }
+
+      if (changed) {
+        await persistSessionIndex()
+      }
+    } catch {
+      // Best-effort — local data is still usable
+    }
+  }
+
   function reset(): void {
     sessions.value = []
     activeSessionId.value = null
+    pendingNewChat.value = false
+    pendingAgent.value = null
     messagesBySession.value = new Map()
     agents.value = []
+    selectedModel.value = null
     activeStreams.value = new Map()
     executingSessions.value = new Set()
   }
 
-  async function syncWithServer(serverSessions: ChatSessionMeta[]): Promise<void> {
-    const localByServerId = new Map<string, ChatSessionMeta>()
-    for (const s of sessions.value) {
-      if (s.serverSessionId) {
-        localByServerId.set(s.serverSessionId, s)
-      }
-    }
+  /** Show input for a new chat without creating a session yet. */
+  function preparePendingChat(): void {
+    activeSessionId.value = null
+    pendingNewChat.value = true
+    pendingAgent.value = null
+  }
 
-    for (const serverSession of serverSessions) {
-      const serverId = serverSession.serverSessionId ?? serverSession.id
-      const existing = localByServerId.get(serverId)
-      if (existing) {
-        existing.title = serverSession.title
-        existing.updatedAt = serverSession.updatedAt
-        existing.syncedAt = new Date().toISOString()
-        if (serverSession.agentId) existing.agentId = serverSession.agentId
-        if (serverSession.agentName) existing.agentName = serverSession.agentName
-      } else {
-        const localSession: ChatSessionMeta = {
-          ...serverSession,
-          syncedAt: new Date().toISOString(),
-        }
-        sessions.value.push(localSession)
-        messagesBySession.value.set(localSession.id, [])
-      }
-    }
+  /** Set the agent for the pending chat (session created on first message). */
+  function setPendingAgent(agentId: string, agentName: string, model: ChatHubConversationModel): void {
+    pendingNewChat.value = true
+    activeSessionId.value = null
+    pendingAgent.value = { agentId, agentName, model }
+  }
 
-    await persistSessionIndex()
+  /** Clear the pending state (called after session is actually created). */
+  function clearPending(): void {
+    pendingNewChat.value = false
+    pendingAgent.value = null
   }
 
   async function createSession(
@@ -193,9 +248,33 @@ export const useChatStore = defineStore('chat', () => {
     return id
   }
 
+  async function renameSession(id: string, newTitle: string): Promise<void> {
+    const trimmed = newTitle.trim()
+    if (!trimmed) return
+    const session = sessions.value.find((s) => s.id === id)
+    if (!session) return
+    session.title = trimmed
+    session.updatedAt = new Date().toISOString()
+    await persistSessionIndex()
+
+    // Sync rename to server
+    const serverSessionId = session.serverSessionId ?? session.id
+    try {
+      const service = getChatHubService()
+      if (service) {
+        await service.updateSession(serverSessionId, { title: trimmed })
+      }
+    } catch {
+      // Server sync is best-effort
+    }
+  }
+
   async function deleteSession(id: string): Promise<void> {
     const instanceId = getInstanceId()
     if (!instanceId) return
+
+    const session = sessions.value.find((s) => s.id === id)
+    const serverSessionId = session?.serverSessionId ?? id
 
     // Copy messages to archive
     const sourcePath = sessionFilePath(instanceId, id)
@@ -216,11 +295,23 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     await persistSessionIndex()
+
+    // Sync delete to server
+    try {
+      const service = getChatHubService()
+      if (service) {
+        await service.deleteSession(serverSessionId)
+      }
+    } catch {
+      // Server sync is best-effort
+    }
   }
 
   function switchSession(id: string): void {
     if (sessions.value.some((s) => s.id === id)) {
       activeSessionId.value = id
+      pendingNewChat.value = false
+      pendingAgent.value = null
     }
   }
 
@@ -320,6 +411,47 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     activeStreams.value.delete(sessionId)
+
+    // After stream ends, poll for the server-generated title.
+    // Title generation is a second LLM call that starts AFTER the stream ends,
+    // so we need to wait and retry.
+    const session = sessions.value.find((s) => s.id === sessionId)
+    if (session && session.messageCount <= 2) {
+      void pollForTitle(sessionId)
+    }
+  }
+
+  /**
+   * Poll the server for the generated title after the first response.
+   * The server generates titles via a second LLM call that runs AFTER the
+   * chat stream completes — typically takes 3-10 seconds.
+   */
+  async function pollForTitle(sessionId: string): Promise<void> {
+    const session = sessions.value.find((s) => s.id === sessionId)
+    if (!session) return
+
+    const service = getChatHubService()
+    if (!service) return
+
+    const serverSessionId = session.serverSessionId ?? session.id
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 3000))
+
+      try {
+        const response = await service.getSession(serverSessionId)
+        const serverTitle = response.session?.title
+        // Accept the title only if it's not the server's "New Chat" placeholder
+        if (serverTitle && serverTitle.trim().toLowerCase() !== 'new chat') {
+          session.title = serverTitle
+          session.updatedAt = new Date().toISOString()
+          await persistSessionIndex()
+          return
+        }
+      } catch {
+        return
+      }
+    }
   }
 
   function handleStreamError(event: ChatHubStreamError): void {
@@ -378,7 +510,32 @@ export const useChatStore = defineStore('chat', () => {
 
   function setAgents(newAgents: ChatModelDto[]): void {
     agents.value = newAgents
+    // Auto-select first available model if nothing is selected yet
+    if (!selectedModel.value && newAgents.length > 0) {
+      const firstAvailable = newAgents.find((a) => a.metadata.available)
+      if (firstAvailable) {
+        selectedModel.value = firstAvailable.model
+      }
+    }
   }
+
+  function selectModel(model: ChatHubConversationModel): void {
+    selectedModel.value = model
+  }
+
+  /** Find the ChatModelDto for the currently selected model */
+  const selectedModelDto = computed((): ChatModelDto | null => {
+    if (!selectedModel.value) return null
+    const sel = selectedModel.value
+    return agents.value.find((a) => {
+      const m = a.model
+      if (m.provider !== sel.provider) return false
+      if ('workflowId' in m && 'workflowId' in sel) return m.workflowId === sel.workflowId
+      if ('agentId' in m && 'agentId' in sel) return m.agentId === sel.agentId
+      if ('model' in m && 'model' in sel) return m.model === sel.model
+      return false
+    }) ?? null
+  })
 
   function getStreamState(sessionId: string): StreamState | undefined {
     return activeStreams.value.get(sessionId)
@@ -388,8 +545,11 @@ export const useChatStore = defineStore('chat', () => {
     // State
     sessions,
     activeSessionId,
+    pendingNewChat,
+    pendingAgent,
     messagesBySession,
     agents,
+    selectedModel,
     activeStreams,
     executingSessions,
 
@@ -399,16 +559,22 @@ export const useChatStore = defineStore('chat', () => {
     messages,
     isStreaming,
     isExecuting,
+    selectedModelDto,
 
     // Actions
     hydrate,
+    syncSessionsFromServer,
     reset,
-    syncWithServer,
+    preparePendingChat,
+    setPendingAgent,
+    clearPending,
     createSession,
+    renameSession,
     deleteSession,
     switchSession,
     appendMessage,
     setAgents,
+    selectModel,
     getStreamState,
 
     // Stream event handlers

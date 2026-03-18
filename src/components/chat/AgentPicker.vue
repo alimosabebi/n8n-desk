@@ -16,6 +16,7 @@ import {
   IonIcon,
 } from '@ionic/vue'
 import { closeOutline } from 'ionicons/icons'
+import LucideIcon from '@/components/ui/LucideIcon.vue'
 import type {
   ChatModelDto,
   ChatHubConversationModel,
@@ -153,10 +154,8 @@ function close() {
   emit('update:isOpen', false)
 }
 
-function renderIcon(icon: AgentIconOrEmoji | null): string {
-  if (!icon) return '🤖'
-  if (icon.type === 'emoji') return icon.value
-  return '🤖' // fallback for icon type — could be extended with actual icon rendering
+function getInitial(name: string): string {
+  return name.charAt(0).toUpperCase()
 }
 </script>
 
@@ -214,7 +213,8 @@ function renderIcon(icon: AgentIconOrEmoji | null): string {
             @click="handleSelect(agent)"
           >
             <div slot="start" :class="$style.agentIcon">
-              {{ renderIcon(agent.icon) }}
+              <LucideIcon v-if="agent.icon?.type === 'icon'" :name="agent.icon.value" :size="18" />
+              <span v-else>{{ getInitial(agent.name) }}</span>
             </div>
             <ion-label>
               <h3 :class="$style.agentName">{{ agent.name }}</h3>
@@ -287,14 +287,10 @@ function renderIcon(icon: AgentIconOrEmoji | null): string {
 }
 
 .agentIcon {
-  font-size: 1.5rem;
-  width: 36px;
-  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius--xs, 8px);
-  background: var(--n8n-desk--content-bg);
+  color: var(--color--text--tint-1);
   margin-right: 12px;
   flex-shrink: 0;
 }
@@ -328,9 +324,5 @@ function renderIcon(icon: AgentIconOrEmoji | null): string {
 
 .selected {
   --background: var(--n8n-desk--surface-raised-bg);
-
-  .agentIcon {
-    background: var(--color--primary);
-  }
 }
 </style>

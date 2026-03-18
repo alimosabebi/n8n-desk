@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Copy, Check } from 'lucide-vue-next'
 import type { SessionMessage } from '@/types/session'
 import type { ChatMessageContentChunk } from '@/types/chathub'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 const isUser = computed(() => props.message.role === 'user')
 const isAssistant = computed(() => props.message.role === 'assistant')
 const isSystem = computed(() => props.message.role === 'system')
+const hasError = computed(() => !!props.message.meta?.error)
 
 /**
  * Parse content chunks from message meta, falling back to a single text chunk.
@@ -51,6 +53,38 @@ const formattedTime = computed(() => {
     return ''
   }
 })
+
+/** Plain text content for copying (strips markdown for assistant, raw for user) */
+const copyableText = computed(() => {
+  if (isUser.value) return props.message.content
+  // For assistant messages, join all text chunks
+  return contentChunks.value
+    .filter((c) => c.type === 'text' || c.type === 'with-buttons')
+    .map((c) => c.content)
+    .join('\n\n')
+})
+
+const justCopied = ref(false)
+
+async function copyMessage(): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(copyableText.value)
+    justCopied.value = true
+    setTimeout(() => { justCopied.value = false }, 1500)
+  } catch {
+    // Fallback for older browsers / Electron
+    const textarea = document.createElement('textarea')
+    textarea.value = copyableText.value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    justCopied.value = true
+    setTimeout(() => { justCopied.value = false }, 1500)
+  }
+}
 </script>
 
 <template>
@@ -104,6 +138,11 @@ const formattedTime = computed(() => {
 
       <!-- Streaming cursor -->
       <BlinkingCursor v-if="isStreaming" />
+
+      <!-- Stream error -->
+      <div v-if="hasError" class="n8n-callout n8n-callout--danger" :class="$style.errorBanner">
+        {{ message.meta?.error }}
+      </div>
     </div>
 
     <!-- System message -->
@@ -114,7 +153,16 @@ const formattedTime = computed(() => {
     <!-- Timestamp + actions -->
     <div :class="$style.meta">
       <span v-if="formattedTime" :class="$style.timestamp">{{ formattedTime }}</span>
-      <div :class="$style.actions">
+      <div :class="[$style.actions, justCopied && $style.actionsVisible]">
+        <button
+          v-if="!isSystem && !isStreaming"
+          :class="[$style.actionBtn, justCopied && $style.actionBtnSuccess]"
+          :title="justCopied ? 'Copied!' : 'Copy message'"
+          @click="copyMessage"
+        >
+          <Check v-if="justCopied" :size="14" />
+          <Copy v-else :size="14" />
+        </button>
         <button
           v-if="isUser"
           :class="$style.actionBtn"
@@ -251,6 +299,10 @@ const formattedTime = computed(() => {
   }
 }
 
+.errorBanner {
+  margin-top: var(--spacing--xs);
+}
+
 .meta {
   display: flex;
   align-items: center;
@@ -271,6 +323,10 @@ const formattedTime = computed(() => {
   transition: opacity 0.15s ease;
 }
 
+.actionsVisible {
+  opacity: 1;
+}
+
 .actionBtn {
   background: none;
   border: none;
@@ -280,10 +336,17 @@ const formattedTime = computed(() => {
   padding: 2px 4px;
   border-radius: var(--radius--xs);
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 
   &:hover {
     color: var(--color--text);
     background: var(--n8n-desk--surface-raised-bg);
   }
+}
+
+.actionBtnSuccess {
+  color: var(--color--success);
+  opacity: 1 !important;
 }
 </style>

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { IonIcon } from '@ionic/vue'
 import { chevronDownOutline, chevronForwardOutline } from 'ionicons/icons'
+import { FilePlus, Pencil } from 'lucide-vue-next'
 import { renderMarkdown } from '@/utils/markdown'
 import { n8nHtml } from '@/directives/n8n-html'
 import type { ChatArtifactCreateCommand, ChatArtifactEditCommand } from '@/types/chathub'
@@ -90,7 +91,7 @@ function toggleExpanded() {
         :icon="isExpanded ? chevronDownOutline : chevronForwardOutline"
         :class="$style.chevron"
       />
-      <span :class="$style.icon">{{ isCreate ? '📄' : '✏️' }}</span>
+      <span :class="$style.icon"><FilePlus v-if="isCreate" :size="14" /><Pencil v-else :size="14" /></span>
       <span :class="$style.title">{{ title }}</span>
       <span :class="$style.badge">{{ artifactType }}</span>
       <span v-if="chunk.isIncomplete" :class="$style.loading">Generating…</span>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { IonButton, IonSearchbar } from '@ionic/vue'
-import { Plus } from 'lucide-vue-next'
+import { IonSearchbar } from '@ionic/vue'
+import { Plus, Search } from 'lucide-vue-next'
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import SessionList from './SessionList.vue'
@@ -8,6 +8,7 @@ import { mockCoworkSessions } from '@/mocks/sidebar'
 
 const { t } = useI18n()
 const searchQuery = ref('')
+const searchVisible = ref(false)
 const activeSessionId = ref<string | null>(null)
 
 function newTask() {
@@ -17,20 +18,32 @@ function newTask() {
 function selectSession(sessionId: string) {
   activeSessionId.value = sessionId
 }
+
+function renameSession(_sessionId: string, _newTitle: string) {
+  // TODO: wire to cowork store when implemented
+}
+
+function deleteSession(_sessionId: string) {
+  // TODO: wire to cowork store when implemented
+}
 </script>
 
 <template>
   <div class="cowork-sidebar">
-    <!-- New Task Button -->
-    <div class="sidebar-section">
-      <ion-button expand="block" class="action-btn" @click="newTask">
-        <Plus :size="18" slot="start" />
-        {{ t('sidebar.newTask') }}
-      </ion-button>
+    <!-- Action Items -->
+    <div class="sidebar-actions">
+      <button class="sidebar-action-btn" @click="newTask">
+        <Plus :size="16" />
+        <span>{{ t('sidebar.newTask') }}</span>
+      </button>
+      <button class="sidebar-action-btn" @click="searchVisible = !searchVisible">
+        <Search :size="16" />
+        <span>{{ t('sidebar.searchTasks').replace('...', '') }}</span>
+      </button>
     </div>
 
-    <!-- Search -->
-    <div class="sidebar-section">
+    <!-- Search (toggleable) -->
+    <div v-if="searchVisible" class="sidebar-section">
       <ion-searchbar
         v-model="searchQuery"
         :placeholder="t('sidebar.searchTasks')"
@@ -43,8 +56,9 @@ function selectSession(sessionId: string) {
       :sessions="mockCoworkSessions"
       :active-session-id="activeSessionId"
       :search-query="searchQuery"
-      :list-header="t('sidebar.tasks')"
       @select="selectSession"
+      @rename="renameSession"
+      @delete="deleteSession"
     />
   </div>
 </template>
@@ -61,13 +75,32 @@ function selectSession(sessionId: string) {
   padding: var(--spacing--2xs) var(--spacing--xs);
 }
 
-.action-btn {
-  --background: var(--color--primary);
-  --color: var(--color--neutral-white);
-  --border-radius: var(--radius--xs);
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: var(--font-weight--medium);
+.sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  padding: var(--spacing--xs) var(--spacing--xs) 0;
+}
+
+.sidebar-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color--text--tint-1);
+  font-size: 13px;
+  font-weight: 400;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover {
+    background: var(--n8n-desk--surface-raised-bg);
+    color: var(--color--text);
+  }
 }
 
 ion-searchbar {
