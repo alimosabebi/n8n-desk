@@ -253,6 +253,13 @@
       "disable": "Disable plugin",
       "enabled": "Enabled",
       "disabled": "Disabled"
+    },
+    "server": {
+      "enable": "Enable server",
+      "disable": "Disable server",
+      "edit": "Edit server",
+      "delete": "Delete server",
+      "requiresApproval": "Requires approval"
     }
   },
   "views": {
