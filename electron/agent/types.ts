@@ -73,6 +73,27 @@ export interface LlmProviderConfig {
   baseUrl?: string
 }
 
+// --- Custom MCP Server Configuration ---
+
+export interface CustomMcpServerConfig {
+  type: 'http'
+  url: string
+  headers: Record<string, string>
+}
+
+// --- Loaded Skill (mirrors src/types/plugin.ts LoadedSkill) ---
+
+export interface LoadedSkill {
+  name: string
+  description: string
+  content: string
+  disableModelInvocation: boolean
+  userInvocable: boolean
+  allowedTools?: string[]
+  directory: string
+  source: 'user' | string
+}
+
 // --- Agent Runner Configuration ---
 
 export interface AgentRunnerConfig {
@@ -81,6 +102,12 @@ export interface AgentRunnerConfig {
   llmConfig: LlmProviderConfig
   systemPrompt: string
   interruptOnTools?: string[]
+  /** Custom MCP servers from plugins and standalone servers, keyed by server name */
+  customMcpServers?: Record<string, CustomMcpServerConfig>
+  /** Pre-built LangChain tools from PluginManager.buildDeepAgentsTools() */
+  customTools?: unknown[]
+  /** Loaded skills for Deep Agents invoke_skill tool */
+  skills?: LoadedSkill[]
 }
 
 // --- Agent Runner Interface ---
