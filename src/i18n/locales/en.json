@@ -245,6 +245,61 @@
     "toolCallFailed": "Tool call failed: {tool}"
   },
   "plugins": {
+    "settings": {
+      "title": "Plugins & Skills",
+      "description": "Manage plugins, MCP servers, marketplaces, and skills.",
+      "tabs": {
+        "installed": "Installed",
+        "discover": "Discover",
+        "marketplaces": "Marketplaces",
+        "skills": "Skills"
+      },
+      "installed": {
+        "pluginsTitle": "Installed Plugins",
+        "pluginsEmpty": "No plugins installed yet. Browse the marketplace to find plugins.",
+        "serversTitle": "MCP Servers",
+        "serversEmpty": "No MCP servers configured.",
+        "addServer": "Add Server"
+      },
+      "discover": {
+        "title": "Discover Plugins",
+        "description": "Browse available plugins from registered marketplaces.",
+        "search": "Search plugins...",
+        "filterAll": "All",
+        "empty": "No plugins found.",
+        "noMarketplaces": "No marketplaces registered. Add a marketplace first.",
+        "loading": "Loading plugins..."
+      },
+      "marketplaces": {
+        "title": "Marketplaces",
+        "description": "Manage plugin marketplaces. Plugins are discovered from these sources.",
+        "empty": "No marketplaces registered yet.",
+        "addTitle": "Add Marketplace",
+        "sourceLabel": "Source Type",
+        "sourceGithub": "GitHub",
+        "sourceUrl": "URL",
+        "sourceLocal": "Local",
+        "repoLabel": "Repository",
+        "repoPlaceholder": "owner/repo",
+        "urlLabel": "Marketplace URL",
+        "urlPlaceholder": "https://example.com/marketplace.json",
+        "refLabel": "Branch / Tag",
+        "refPlaceholder": "main",
+        "add": "Add",
+        "refresh": "Refresh",
+        "remove": "Remove",
+        "pluginCount": "{count} plugin | {count} plugins",
+        "lastUpdated": "Added {date}",
+        "addFailed": "Failed to add marketplace. Please try again."
+      },
+      "skills": {
+        "title": "Skills",
+        "description": "Create and manage custom skills for the AI agent.",
+        "empty": "No skills loaded. Create a skill to get started.",
+        "createSkill": "Create Skill",
+        "deleteConfirm": "Delete skill \"{name}\"? This cannot be undone."
+      }
+    },
     "card": {
       "install": "Install",
       "installing": "Installing...",
