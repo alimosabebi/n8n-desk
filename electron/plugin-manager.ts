@@ -142,7 +142,7 @@ async function ensureDir(dirPath: string): Promise<void> {
  * Keys are namespaced: `n8n-desk:plugin:{pluginId}:{headerName}` or
  * `n8n-desk:server:{serverId}:{headerName}`.
  */
-function keychainPath(key: string): string {
+export function keychainPath(key: string): string {
   const safeKey = key.replace(/[^a-zA-Z0-9_-]/g, '_')
   return path.join(BASE_DIR, 'keychain', `${safeKey}.enc`)
 }
@@ -275,7 +275,7 @@ function resolvePluginRepoInfo(
  * Entries without a `url` field are skipped.
  * Header names are extracted — values must be stored separately in the keychain.
  */
-function parseMcpJson(
+export function parseMcpJson(
   mcpJson: Record<string, RawMcpJsonEntry>,
   pluginId: string,
 ): Record<string, PluginMcpServerConfig> {

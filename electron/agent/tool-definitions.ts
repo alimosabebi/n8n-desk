@@ -125,7 +125,7 @@ export function createMcpTools(instanceUrl: string, accessToken: string): LangCh
  *
  * @see spec: "hand-rolled converter covering the 6 common JSON Schema types"
  */
-function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
+export function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
   const type = schema.type as string | undefined
   const enumValues = schema.enum as string[] | undefined
 
