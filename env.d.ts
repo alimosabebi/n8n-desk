@@ -43,6 +43,56 @@ interface N8nDeskBridge {
     set: (key: string, value: string) => Promise<void>
     delete: (key: string) => Promise<void>
   }
+  plugins: {
+    // Marketplace
+    marketplaceList: () => Promise<import('./src/types/plugin').Marketplace[] | { success: false; error: string }>
+    marketplaceAdd: (source: import('./src/types/plugin').MarketplaceSource) =>
+      Promise<{ success: true; marketplace: import('./src/types/plugin').Marketplace } | { success: false; error: string }>
+    marketplaceRemove: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+    marketplaceRefresh: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+
+    // Browse
+    browse: (marketplaceId?: string) =>
+      Promise<import('./src/types/plugin').MarketplacePluginEntry[] | { success: false; error: string }>
+
+    // Plugin lifecycle
+    installedList: () => Promise<import('./src/types/plugin').InstalledPlugin[] | { success: false; error: string }>
+    install: (name: string, marketplaceId: string) =>
+      Promise<{ success: true; plugin: import('./src/types/plugin').InstalledPlugin } | { success: false; error: string }>
+    uninstall: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+    enable: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+    disable: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+    previewInstall: (name: string, marketplaceId: string) =>
+      Promise<{ urls: string[]; headerNames: string[]; toolCount: number; error?: string }>
+
+    // Standalone MCP servers
+    serversList: () => Promise<import('./src/types/plugin').StandaloneMcpServer[] | { success: false; error: string }>
+    serversAdd: (config: {
+      name: string
+      description?: string
+      url: string
+      headerNames?: string[]
+      enabled: boolean
+      requireApproval: boolean
+    }) => Promise<{ success: true; server: import('./src/types/plugin').StandaloneMcpServer } | { success: false; error: string }>
+    serversUpdate: (id: string, updates: Record<string, unknown>) =>
+      Promise<{ success: true } | { success: false; error: string }>
+    serversRemove: (id: string) => Promise<{ success: true } | { success: false; error: string }>
+    serversTest: (url: string, headers: Record<string, string>) =>
+      Promise<{ success: true; tools: import('./src/types/plugin').DiscoveredTool[] } | { success: false; error: string }>
+
+    // Secret management
+    setSecret: (namespace: 'plugin' | 'server', id: string, headerName: string, value: string) =>
+      Promise<{ success: true } | { success: false; error: string }>
+    deleteSecrets: (namespace: 'plugin' | 'server', id: string) =>
+      Promise<{ success: true } | { success: false; error: string }>
+
+    // Skills
+    listSkills: () => Promise<import('./src/types/plugin').LoadedSkill[] | { success: false; error: string }>
+    saveSkill: (skill: { name: string; content: string }) =>
+      Promise<{ success: true } | { success: false; error: string }>
+    deleteSkill: (name: string) => Promise<{ success: true } | { success: false; error: string }>
+  }
 }
 
 interface Window {

@@ -83,7 +83,13 @@ export class ClaudeSdkRunner implements AgentRunner {
 
     // canUseTool callback — intercept destructive tools for approval.
     // Must return the full PermissionResult type the SDK expects.
-    const interruptTools = new Set(config.interruptOnTools ?? [...DESTRUCTIVE_TOOLS])
+    // Always include built-in destructive tools, plus any additional tools from
+    // approval-required custom MCP servers (populated by the IPC handler via
+    // PluginManager.getApprovalRequiredServerNames() + tool discovery).
+    const interruptTools = new Set([
+      ...DESTRUCTIVE_TOOLS,
+      ...(config.interruptOnTools ?? []),
+    ])
     const canUseTool: import('@anthropic-ai/claude-agent-sdk').CanUseTool = async (
       toolName,
       input,
@@ -135,6 +141,31 @@ export class ClaudeSdkRunner implements AgentRunner {
     // Configure the MCP server pointing to n8n's endpoint
     const mcpServerUrl = `${config.instanceUrl.replace(/\/$/, '')}/mcp-server/http`
 
+    // Build the MCP servers map: n8n entry + any custom servers from plugins/standalone.
+    // Credential isolation: n8n Bearer token only in the 'n8n' entry, each custom server
+    // only gets its own headers. Server names must be unique — 'n8n' is reserved.
+    const mcpServers: Record<string, { type: 'http'; url: string; headers: Record<string, string> }> = {
+      'n8n': {
+        type: 'http',
+        url: mcpServerUrl,
+        headers: {
+          Authorization: `Bearer ${config.accessToken}`,
+        },
+      },
+    }
+
+    if (config.customMcpServers) {
+      for (const [name, serverConfig] of Object.entries(config.customMcpServers)) {
+        // Skip if name collides with the reserved 'n8n' entry
+        if (name === 'n8n') continue
+        mcpServers[name] = {
+          type: serverConfig.type,
+          url: serverConfig.url,
+          headers: { ...serverConfig.headers },
+        }
+      }
+    }
+
     try {
       const queryInstance = queryFn({
         prompt: message,
@@ -144,15 +175,7 @@ export class ClaudeSdkRunner implements AgentRunner {
           abortController,
           permissionMode: 'acceptEdits',
           canUseTool,
-          mcpServers: {
-            'n8n': {
-              type: 'http',
-              url: mcpServerUrl,
-              headers: {
-                Authorization: `Bearer ${config.accessToken}`,
-              },
-            },
-          },
+          mcpServers,
           // Disable all built-in tools — we only want MCP tools
           tools: [],
           // Set working directory explicitly to avoid undefined path errors

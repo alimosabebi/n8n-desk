@@ -1,11 +1,15 @@
 import { randomUUID } from 'crypto'
+import { z } from 'zod'
+import { tool } from '@langchain/core/tools'
 import type {
   AgentRunner,
   AgentRunnerConfig,
   AgentStreamEvent,
   LlmProviderConfig,
+  LoadedSkill,
 } from './types'
 import { createMcpTools } from './tool-definitions'
+import { substituteArguments } from '../skill-loader'
 
 // Destructive MCP tools that require user approval before execution
 const DESTRUCTIVE_TOOLS = new Set([
@@ -59,6 +63,33 @@ async function createChatModel(config: LlmProviderConfig): Promise<unknown> {
 }
 
 /**
+ * Create the `invoke_skill` LangChain tool for Deep Agents.
+ *
+ * Accepts a skill name and optional arguments string. Returns the full
+ * skill content with `$ARGUMENTS` / `$0` / `$1` / etc. substituted.
+ * This enables lazy loading: the system prompt contains only short
+ * descriptions, and full skill content is expanded on invocation.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createInvokeSkillTool(skills: LoadedSkill[]): any {
+  return tool(
+    async ({ skillName, arguments: skillArgs }: { skillName: string; arguments?: string }) => {
+      const skill = skills.find((s) => s.name === skillName)
+      if (!skill) return `Skill "${skillName}" not found.`
+      return substituteArguments(skill.content, skillArgs ?? '')
+    },
+    {
+      name: 'invoke_skill',
+      description: 'Load and invoke a skill by name. Returns the full skill instructions with arguments substituted.',
+      schema: z.object({
+        skillName: z.string().describe('The kebab-case name of the skill to invoke'),
+        arguments: z.string().optional().describe('Arguments to substitute into the skill content'),
+      }),
+    },
+  )
+}
+
+/**
  * Deep Agents SDK runner implementation.
  *
  * Uses createDeepAgent from the deepagents package with LangChain ChatModel
@@ -107,11 +138,25 @@ export class DeepAgentsRunner implements AgentRunner {
       // Create the LLM chat model
       const chatModel = await createChatModel(config.llmConfig)
 
-      // Create MCP tool wrappers
-      const tools = createMcpTools(config.instanceUrl, config.accessToken)
+      // Create MCP tool wrappers and merge custom tools
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tools: any[] = [
+        ...createMcpTools(config.instanceUrl, config.accessToken),
+      ]
 
-      // Determine which tools require approval
+      // Merge pre-built LangChain tools from PluginManager.buildDeepAgentsTools()
+      if (config.customTools && config.customTools.length > 0) {
+        tools.push(...config.customTools)
+      }
+
+      // Add invoke_skill tool when skills are configured
+      if (config.skills && config.skills.length > 0) {
+        tools.push(createInvokeSkillTool(config.skills))
+      }
+
+      // Determine which tools require approval (includes approval-required server tools)
       const interruptTools = config.interruptOnTools ?? [...DESTRUCTIVE_TOOLS]
+      const interruptToolSet = new Set(interruptTools)
 
       // Create the deep agent
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,7 +184,7 @@ export class DeepAgentsRunner implements AgentRunner {
       for await (const event of stream) {
         if (abortController.signal.aborted) break
 
-        const normalized = this.normalizeEvent(sessionId, event)
+        const normalized = this.normalizeEvent(sessionId, event, interruptToolSet)
         for (const evt of normalized) {
           // Handle approval interrupts
           if (evt.type === 'approval_required') {
@@ -254,6 +299,7 @@ export class DeepAgentsRunner implements AgentRunner {
   private normalizeEvent(
     sessionId: string,
     event: Record<string, unknown>,
+    interruptToolSet: Set<string>,
   ): AgentStreamEvent[] {
     const events: AgentStreamEvent[] = []
 
@@ -278,8 +324,8 @@ export class DeepAgentsRunner implements AgentRunner {
       const name = typeof event.name === 'string' ? event.name : 'unknown'
       const id = typeof event.run_id === 'string' ? event.run_id : randomUUID()
 
-      // Check if this tool requires approval (interrupt)
-      if (DESTRUCTIVE_TOOLS.has(name)) {
+      // Check if this tool requires approval (includes custom server approval-required tools)
+      if (interruptToolSet.has(name)) {
         events.push({
           type: 'approval_required',
           sessionId,

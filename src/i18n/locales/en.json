@@ -44,7 +44,8 @@
       "general": "General",
       "instances": "Instances",
       "dangerZone": "Danger Zone",
-      "aiAgent": "AI / Agent"
+      "aiAgent": "AI / Agent",
+      "plugins": "Plugins"
     },
     "ai": {
       "description": "Configure the AI backend for Cowork and Workflow modes.",
@@ -243,6 +244,166 @@
     "agentFailed": "Agent invocation failed",
     "connectionLost": "Connection to n8n instance lost",
     "toolCallFailed": "Tool call failed: {tool}"
+  },
+  "plugins": {
+    "settings": {
+      "title": "Plugins & Skills",
+      "description": "Manage plugins, MCP servers, marketplaces, and skills.",
+      "tabs": {
+        "installed": "Installed",
+        "discover": "Discover",
+        "marketplaces": "Marketplaces",
+        "skills": "Skills"
+      },
+      "installed": {
+        "pluginsTitle": "Installed Plugins",
+        "pluginsEmpty": "No plugins installed yet. Browse the marketplace to find plugins.",
+        "serversTitle": "MCP Servers",
+        "serversEmpty": "No MCP servers configured.",
+        "addServer": "Add Server"
+      },
+      "discover": {
+        "title": "Discover Plugins",
+        "description": "Browse available plugins from registered marketplaces.",
+        "search": "Search plugins...",
+        "filterAll": "All",
+        "empty": "No plugins found.",
+        "noMarketplaces": "No marketplaces registered. Add a marketplace first.",
+        "loading": "Loading plugins..."
+      },
+      "marketplaces": {
+        "title": "Marketplaces",
+        "description": "Manage plugin marketplaces. Plugins are discovered from these sources.",
+        "empty": "No marketplaces registered yet.",
+        "addTitle": "Add Marketplace",
+        "sourceLabel": "Source Type",
+        "sourceGithub": "GitHub",
+        "sourceUrl": "URL",
+        "sourceLocal": "Local",
+        "repoLabel": "Repository",
+        "repoPlaceholder": "owner/repo",
+        "urlLabel": "Marketplace URL",
+        "urlPlaceholder": "https://example.com/marketplace.json",
+        "refLabel": "Branch / Tag",
+        "refPlaceholder": "main",
+        "add": "Add",
+        "refresh": "Refresh",
+        "remove": "Remove",
+        "pluginCount": "{count} plugin | {count} plugins",
+        "lastUpdated": "Added {date}",
+        "addFailed": "Failed to add marketplace. Please try again."
+      },
+      "skills": {
+        "title": "Skills",
+        "description": "Create and manage custom skills for the AI agent.",
+        "empty": "No skills loaded. Create a skill to get started.",
+        "createSkill": "Create Skill",
+        "deleteConfirm": "Delete skill \"{name}\"? This cannot be undone."
+      }
+    },
+    "card": {
+      "install": "Install",
+      "installing": "Installing...",
+      "uninstall": "Uninstall",
+      "enable": "Enable plugin",
+      "disable": "Disable plugin",
+      "enabled": "Enabled",
+      "disabled": "Disabled"
+    },
+    "server": {
+      "enable": "Enable server",
+      "disable": "Disable server",
+      "edit": "Edit server",
+      "delete": "Delete server",
+      "requiresApproval": "Requires approval"
+    },
+    "addServer": {
+      "title": "Add MCP Server",
+      "titleEdit": "Edit MCP Server",
+      "name": "Name",
+      "namePlaceholder": "My MCP Server",
+      "url": "Server URL",
+      "urlPlaceholder": "https://mcp.example.com/sse",
+      "urlRequired": "Server URL is required",
+      "urlInvalid": "Enter a valid HTTP or HTTPS URL",
+      "description": "Description",
+      "descriptionPlaceholder": "What does this server provide?",
+      "headers": "Headers",
+      "headersHint": "Add authentication or custom headers. Values are stored securely in the OS keychain.",
+      "headerName": "Header name",
+      "headerNamePlaceholder": "Authorization",
+      "headerValue": "Header value",
+      "headerValuePlaceholder": "Bearer sk-...",
+      "addHeader": "Add header",
+      "removeHeader": "Remove header",
+      "requireApproval": "Require approval",
+      "requireApprovalHint": "Ask for confirmation before executing tools from this server",
+      "testConnection": "Test Connection",
+      "testFailed": "Connection failed. Check the URL and try again.",
+      "toolsDiscovered": "Discovered {count} tool | Discovered {count} tools",
+      "add": "Add Server",
+      "save": "Save",
+      "cancel": "Cancel",
+      "saveFailed": "Failed to save server. Please try again."
+    },
+    "installConfirm": {
+      "title": "Install Plugin",
+      "description": "Review the details below before installing \"{name}\".",
+      "serverUrls": "Server URLs",
+      "authHeaders": "Required Auth Headers",
+      "noHeaders": "None",
+      "toolCount": "{count} tool discovered | {count} tools discovered",
+      "toolCountUnknown": "Tool count unavailable (auth may be required)",
+      "securityInfo": "Plugins connect to remote HTTP servers only. No code runs locally.",
+      "enterHeaderValues": "Enter values for required auth headers. Values are stored securely in the OS keychain.",
+      "headerValue": "Value for {name}",
+      "headerPlaceholder": "Enter value...",
+      "confirm": "Install",
+      "cancel": "Cancel",
+      "installing": "Installing...",
+      "previewFailed": "Failed to load plugin details. Please try again.",
+      "installFailed": "Installation failed. Please try again."
+    },
+    "skill": {
+      "edit": "Edit",
+      "delete": "Delete",
+      "auto": "Auto",
+      "manual": "Manual",
+      "sourceUser": "User"
+    },
+    "popover": {
+      "plugins": "Plugins",
+      "servers": "Servers",
+      "noPlugins": "No plugins installed",
+      "noServers": "No servers configured",
+      "empty": "No plugins or servers configured. Add them in Settings.",
+      "manageInSettings": "Manage in Settings"
+    },
+    "skillEditor": {
+      "title": "Create Skill",
+      "titleEdit": "Edit Skill",
+      "name": "Name",
+      "namePlaceholder": "my-skill-name",
+      "nameHint": "Kebab-case only (lowercase letters, numbers, hyphens).",
+      "nameRequired": "Skill name is required",
+      "nameInvalid": "Name must be kebab-case (e.g., my-skill-name)",
+      "description": "Description",
+      "descriptionPlaceholder": "Brief description of what this skill does",
+      "instructions": "Instructions",
+      "instructionsPlaceholder": "Write the skill instructions in markdown...",
+      "instructionsHint": "The markdown body of the SKILL.md file. This is what the agent sees when the skill is invoked.",
+      "disableModelInvocation": "Disable model invocation",
+      "disableModelInvocationHint": "Prevent the model from automatically invoking this skill",
+      "userInvocable": "User invocable",
+      "userInvocableHint": "Allow manual invocation via slash command",
+      "allowedTools": "Allowed tools",
+      "allowedToolsPlaceholder": "tool-one, tool-two, tool-three",
+      "allowedToolsHint": "Comma-separated list of tools this skill can use.",
+      "create": "Create Skill",
+      "save": "Save",
+      "cancel": "Cancel",
+      "saveFailed": "Failed to save skill. Please try again."
+    }
   },
   "views": {
     "chatComingSoon": "Chat mode — coming soon",

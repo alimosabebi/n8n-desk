@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { tool } from '@langchain/core/tools'
-import { callTool } from '../mcp-client'
+import { callTool, callToolWithUrl, listToolsWithUrl } from '../mcp-client'
 
 // --- Types ---
 
@@ -112,4 +112,93 @@ export function createMcpTools(instanceUrl: string, accessToken: string): LangCh
       workflowId: z.string().describe('ID of the workflow to archive'),
     })),
   ]
+}
+
+// --- JSON Schema → Zod Converter ---
+
+/**
+ * Convert a JSON Schema object to a Zod schema at runtime.
+ *
+ * Handles the 6 common JSON Schema types that MCP tools typically use:
+ * string, number/integer, boolean, array, object, and enum.
+ * Falls back to `z.any()` for unsupported constructs (allOf, anyOf, oneOf, etc.).
+ *
+ * @see spec: "hand-rolled converter covering the 6 common JSON Schema types"
+ */
+export function jsonSchemaToZod(schema: Record<string, unknown>): z.ZodTypeAny {
+  const type = schema.type as string | undefined
+  const enumValues = schema.enum as string[] | undefined
+
+  if (enumValues) return z.enum(enumValues as [string, ...string[]])
+
+  switch (type) {
+    case 'string': return z.string()
+    case 'number': case 'integer': return z.number()
+    case 'boolean': return z.boolean()
+    case 'array': {
+      const items = schema.items as Record<string, unknown> | undefined
+      return z.array(items ? jsonSchemaToZod(items) : z.any())
+    }
+    case 'object': {
+      const properties = schema.properties as Record<string, Record<string, unknown>> | undefined
+      const required = schema.required as string[] | undefined
+      if (!properties) return z.record(z.any())
+      const shape: Record<string, z.ZodTypeAny> = {}
+      for (const [key, propSchema] of Object.entries(properties)) {
+        const zodType = jsonSchemaToZod(propSchema)
+        shape[key] = required?.includes(key) ? zodType : zodType.optional()
+        if (propSchema.description) shape[key] = shape[key].describe(propSchema.description as string)
+      }
+      return z.object(shape)
+    }
+    default: return z.any()
+  }
+}
+
+// --- Dynamic MCP Tool Factory ---
+
+/**
+ * Create LangChain tool wrappers for all tools discovered from custom MCP servers.
+ *
+ * For each server, calls `listToolsWithUrl()` to discover available tools, then
+ * wraps each as a LangChain `tool()` with a Zod schema built from the JSON Schema
+ * `inputSchema` returned by the server. Tool names are namespaced as
+ * `{serverName}__{toolName}` to avoid collisions across servers.
+ *
+ * Graceful degradation: if a server is unreachable or returns an error, its tools
+ * are skipped and the remaining servers continue processing.
+ */
+export async function createDynamicMcpTools(
+  servers: Record<string, { url: string; headers: Record<string, string> }>,
+): Promise<LangChainTool[]> {
+  const allTools: LangChainTool[] = []
+
+  for (const [serverName, serverConfig] of Object.entries(servers)) {
+    try {
+      const toolInfos = await listToolsWithUrl(serverConfig.url, serverConfig.headers)
+      for (const info of toolInfos) {
+        const namespacedName = `${serverName}__${info.name}`
+        const schema = info.inputSchema
+          ? jsonSchemaToZod(info.inputSchema) as z.ZodObject<z.ZodRawShape>
+          : z.object({})
+
+        allTools.push(tool(
+          async (args: Record<string, unknown>) => {
+            const result = await callToolWithUrl(serverConfig.url, serverConfig.headers, info.name, args)
+            if (result.isError) {
+              throw new Error(result.content.map((c) => c.text ?? JSON.stringify(c)).join('\n'))
+            }
+            return result.content.map((c) => c.text ?? JSON.stringify(c)).join('\n')
+          },
+          { name: namespacedName, description: info.description ?? '', schema },
+        ))
+      }
+    } catch (err) {
+      // Graceful degradation — skip this server, continue with others
+      const errMessage = err instanceof Error ? err.message : String(err)
+      console.error(`[n8n-desk] Failed to discover tools from ${serverName}: ${errMessage}`)
+    }
+  }
+
+  return allTools
 }

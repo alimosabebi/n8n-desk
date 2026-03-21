@@ -2,14 +2,18 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { IonIcon } from '@ionic/vue'
 import { sendOutline, settingsOutline } from 'ionicons/icons'
+import { Plug } from 'lucide-vue-next'
 import { useWorkflowAgent } from '@/composables/useWorkflowAgent'
 import { useSettingsStore } from '@/stores/settings'
 import { useWorkflowSessionsStore } from '@/stores/workflow-sessions'
+import { usePluginsStore } from '@/stores/plugins'
 import type { WorkflowPreviewData, WorkflowJson } from '@/types/agent'
+import type { LoadedSkill } from '@/types/plugin'
 import { renderMarkdown } from '@/utils/markdown'
 import ToolCallCard from './ToolCallCard.vue'
 import ApprovalCard from './ApprovalCard.vue'
 import WorkflowInlineCard from './WorkflowInlineCard.vue'
+import PluginPopover from '@/components/plugins/PluginPopover.vue'
 
 const {
   messages,
@@ -22,11 +26,73 @@ const {
 
 const settingsStore = useSettingsStore()
 const sessionStore = useWorkflowSessionsStore()
+const pluginsStore = usePluginsStore()
 const hasLlmConfig = computed(() => settingsStore.hasLlmConfig)
 
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
+
+// --- Plugin popover ---
+const pluginPopoverOpen = ref(false)
+
+// --- Skill autocomplete ---
+const autocompleteIndex = ref(0)
+const autocompleteDismissed = ref(false)
+
+const invocableSkills = computed(() =>
+  pluginsStore.skills.filter((s) => s.userInvocable),
+)
+
+const filteredSkills = computed((): LoadedSkill[] => {
+  const text = inputText.value
+  if (!text.startsWith('/')) return []
+  // Only show while typing the command name (no space yet)
+  if (text.includes(' ')) return []
+  const prefix = text.slice(1).toLowerCase()
+  const skills = invocableSkills.value
+  if (!prefix) return skills.slice(0, 8)
+  return skills
+    .filter((s) => s.name.toLowerCase().startsWith(prefix))
+    .slice(0, 8)
+})
+
+const showSkillAutocomplete = computed(() => {
+  if (autocompleteDismissed.value) return false
+  return filteredSkills.value.length > 0
+})
+
+// Reset dismissed state when input changes
+watch(inputText, () => {
+  autocompleteDismissed.value = false
+  autocompleteIndex.value = 0
+})
+
+function selectSkillFromAutocomplete(skill: LoadedSkill) {
+  inputText.value = `/${skill.name} `
+  autocompleteDismissed.value = true
+  nextTick(() => {
+    resizeTextarea()
+    textareaRef.value?.focus()
+  })
+}
+
+/** Resolve /skill-name input: replace with skill content, substituting $ARGUMENTS */
+function resolveSkillInput(text: string): string {
+  if (!text.startsWith('/')) return text
+  const spaceIdx = text.indexOf(' ')
+  const skillName = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx)
+  const args = spaceIdx === -1 ? '' : text.slice(spaceIdx + 1).trim()
+
+  const skill = invocableSkills.value.find((s) => s.name === skillName)
+  if (!skill) return text // Not a known skill — send as-is
+
+  return skill.content.replace(/\$ARGUMENTS/g, args)
+}
+
+function handleManagePluginSettings() {
+  pluginPopoverOpen.value = false
+}
 
 const canSend = computed(() =>
   inputText.value.trim().length > 0 && !isRunning.value && hasLlmConfig.value
@@ -52,6 +118,34 @@ function handleInput() {
 }
 
 function handleKeydown(e: KeyboardEvent) {
+  // Skill autocomplete keyboard navigation
+  if (showSkillAutocomplete.value) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      autocompleteIndex.value = Math.min(
+        autocompleteIndex.value + 1,
+        filteredSkills.value.length - 1,
+      )
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      autocompleteIndex.value = Math.max(autocompleteIndex.value - 1, 0)
+      return
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+      e.preventDefault()
+      const selected = filteredSkills.value[autocompleteIndex.value]
+      if (selected) selectSkillFromAutocomplete(selected)
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      autocompleteDismissed.value = true
+      return
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
@@ -62,8 +156,10 @@ async function send() {
   if (!canSend.value) return
   const text = inputText.value.trim()
   inputText.value = ''
+  autocompleteDismissed.value = true
   nextTick(resizeTextarea)
-  await sendMessage(text)
+  const resolved = resolveSkillInput(text)
+  await sendMessage(resolved)
 }
 
 function handleApprove(_id: string) {
@@ -257,7 +353,32 @@ onMounted(scrollToBottom)
           <ion-icon :icon="settingsOutline" :class="$style.configIcon" />
           Configure AI in Settings > AI/Agent
         </div>
+
+        <!-- Skill autocomplete dropdown -->
+        <div v-if="showSkillAutocomplete" :class="$style.autocomplete">
+          <div
+            v-for="(skill, idx) in filteredSkills"
+            :key="skill.name"
+            :class="[
+              $style.autocompleteItem,
+              idx === autocompleteIndex && $style.autocompleteItemActive,
+            ]"
+            @mousedown.prevent="selectSkillFromAutocomplete(skill)"
+          >
+            <span :class="$style.autocompleteCmd">/{{ skill.name }}</span>
+            <span v-if="skill.description" :class="$style.autocompleteDesc">{{ skill.description }}</span>
+          </div>
+        </div>
+
         <div :class="$style.inputRow">
+          <button
+            id="workflow-plugin-trigger"
+            :class="$style.pluginBtn"
+            title="Plugins"
+            @click="pluginPopoverOpen = !pluginPopoverOpen"
+          >
+            <Plug :size="16" />
+          </button>
           <textarea
             ref="textareaRef"
             v-model="inputText"
@@ -278,6 +399,13 @@ onMounted(scrollToBottom)
         </div>
       </div>
     </div>
+
+    <!-- Plugin popover -->
+    <PluginPopover
+      v-model:is-open="pluginPopoverOpen"
+      trigger="workflow-plugin-trigger"
+      @manage-settings="handleManagePluginSettings"
+    />
   </div>
 </template>
 
@@ -606,5 +734,75 @@ onMounted(scrollToBottom)
   &:not(:disabled):hover {
     opacity: 0.9;
   }
+}
+
+.pluginBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--n8n-desk--surface-raised-bg, var(--color--foreground));
+  background: var(--n8n-desk--surface-bg, var(--color--foreground));
+  color: var(--color--text--tint-1);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+
+  &:hover {
+    color: var(--color--primary, #ff6d5a);
+    border-color: var(--color--primary, #ff6d5a);
+    background: var(--n8n-desk--surface-raised-bg, var(--color--foreground));
+  }
+}
+
+// Skill autocomplete dropdown
+.autocomplete {
+  position: relative;
+  background: var(--n8n-desk--surface-bg, var(--color--foreground));
+  border: 1px solid var(--n8n-desk--surface-raised-bg, var(--color--foreground));
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.autocompleteItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+
+  &:hover {
+    background: var(--n8n-desk--surface-raised-bg, var(--color--foreground));
+  }
+}
+
+.autocompleteItemActive {
+  background: var(--n8n-desk--surface-raised-bg, var(--color--foreground));
+}
+
+.autocompleteCmd {
+  font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', 'Menlo', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color--primary, #ff6d5a);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.autocompleteDesc {
+  font-size: 12px;
+  color: var(--color--text--tint-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 </style>
