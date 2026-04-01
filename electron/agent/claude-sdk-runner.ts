@@ -41,6 +41,8 @@ export class ClaudeSdkRunner implements AgentRunner {
   private abortControllers = new Map<string, AbortController>()
   private pendingApprovals = new Map<string, PendingApproval>()
   private activeQueries = new Map<string, { close: () => void }>()
+  /** Per-session local MCP servers exposing sandboxed file tools + js_compute */
+  private localMcpServers = new Map<string, { stop: () => Promise<void> }>()
 
   async *invoke(
     sessionId: string,
@@ -166,6 +168,33 @@ export class ClaudeSdkRunner implements AgentRunner {
       }
     }
 
+    // Start a local MCP server exposing sandboxed file tools + js_compute
+    // when a sandbox policy is present. The Claude SDK only supports MCP
+    // servers (not raw LangChain tools), so local tools must be exposed
+    // via a localhost HTTP MCP server. The server is per-session and stopped
+    // on cleanup. File tools and js_compute do NOT require approval.
+    if (config.sandboxPolicy) {
+      try {
+        const { LocalMcpServer } = await import('./local-mcp-server')
+        const localServer = new LocalMcpServer(config.sandboxPolicy)
+        const serverInfo = await localServer.start()
+        this.localMcpServers.set(sessionId, localServer)
+
+        // 'n8n-desk-local' is reserved for the per-session file tools server
+        mcpServers['n8n-desk-local'] = {
+          type: 'http',
+          url: serverInfo.url,
+          headers: {},
+        }
+      } catch (err) {
+        // Non-fatal: file tools won't be available, but n8n MCP tools still work
+        console.error(
+          '[n8n-desk] Failed to start local MCP server for file tools:',
+          err instanceof Error ? err.message : String(err),
+        )
+      }
+    }
+
     try {
       // Build the prompt: if we have conversation history, format it as context
       let fullPrompt = message
@@ -271,6 +300,13 @@ export class ClaudeSdkRunner implements AgentRunner {
     this.abortControllers.delete(sessionId)
     this.pendingApprovals.delete(sessionId)
     this.activeQueries.delete(sessionId)
+
+    // Stop the per-session local MCP server (file tools + js_compute)
+    const localServer = this.localMcpServers.get(sessionId)
+    if (localServer) {
+      localServer.stop().catch(() => {})
+      this.localMcpServers.delete(sessionId)
+    }
   }
 
   /**
