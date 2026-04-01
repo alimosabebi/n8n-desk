@@ -1,6 +1,6 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
-import type { SessionMeta, SessionMessage } from '@/types/session'
+import type { AttachedFolder, SessionMeta, SessionMessage } from '@/types/session'
 import type { AgentEvent, AgentToolCall, AgentApprovalRequiredEvent, WorkflowPreviewData, WorkflowJson } from '@/types/agent'
 import { localStorageService } from '@/services/local-storage'
 
@@ -68,7 +68,7 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
   /**
    * Create a new session and persist it.
    */
-  async function createSession(title?: string): Promise<string> {
+  async function createSession(title?: string, initialFolders?: AttachedFolder[]): Promise<string> {
     if (!currentInstanceId) throw new Error('No active instance')
 
     const now = new Date().toISOString()
@@ -80,6 +80,7 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
+      ...(initialFolders && initialFolders.length > 0 ? { attachedFolders: initialFolders } : {}),
     }
 
     sessions.value.unshift(meta)
@@ -119,6 +120,48 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
         messages.value = []
       }
     }
+  }
+
+  /**
+   * Attach a folder to a session's metadata and persist to index.json.
+   */
+  async function attachFolder(sessionId: string, folder: AttachedFolder): Promise<void> {
+    if (!currentInstanceId) return
+
+    const meta = sessions.value.find((s) => s.id === sessionId)
+    if (!meta) return
+
+    if (!meta.attachedFolders) {
+      meta.attachedFolders = []
+    }
+
+    // Avoid duplicates — check by path
+    const alreadyAttached = meta.attachedFolders.some((f) => f.path === folder.path)
+    if (alreadyAttached) return
+
+    meta.attachedFolders.push(folder)
+    meta.updatedAt = new Date().toISOString()
+    await localStorageService.writeJson(indexPath(currentInstanceId), sessions.value)
+  }
+
+  /**
+   * Detach a folder from a session's metadata and persist to index.json.
+   */
+  async function detachFolder(sessionId: string, folderPath: string): Promise<void> {
+    if (!currentInstanceId) return
+
+    const meta = sessions.value.find((s) => s.id === sessionId)
+    if (!meta || !meta.attachedFolders) return
+
+    meta.attachedFolders = meta.attachedFolders.filter((f) => f.path !== folderPath)
+
+    // Clean up empty array
+    if (meta.attachedFolders.length === 0) {
+      delete meta.attachedFolders
+    }
+
+    meta.updatedAt = new Date().toISOString()
+    await localStorageService.writeJson(indexPath(currentInstanceId), sessions.value)
   }
 
   /**
@@ -447,6 +490,8 @@ export const useWorkflowSessionsStore = defineStore('workflow-sessions', () => {
     hydrate,
     createSession,
     deleteSession,
+    attachFolder,
+    detachFolder,
     selectSession,
     appendMessage,
     handleAgentEvent,
