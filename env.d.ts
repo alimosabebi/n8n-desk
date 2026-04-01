@@ -30,6 +30,7 @@ interface N8nDeskBridge {
       Promise<{ status: number; headers: Record<string, string>; body: string }>
   }
   auth: {
+    validateInstance: (instanceUrl: string) => Promise<import('./src/types/auth').ValidateInstanceResult>
     login: (instanceUrl: string, options?: { forceLocalhost?: boolean }) => Promise<import('./src/types/auth').AuthLoginResult>
     logout: (instanceId: string) => Promise<void>
     refresh: (instanceId: string) => Promise<import('./src/types/auth').AuthRefreshResult>

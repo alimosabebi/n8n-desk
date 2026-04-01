@@ -48,18 +48,20 @@ export interface UserProfile {
   email: string
 }
 
-/** Persisted to auth.json — non-secret metadata only, NO tokens */
+/** Persisted to auth.json — non-secret metadata only, NO tokens.
+ *  OAuth fields are optional — chatUsers skip MCP OAuth entirely. */
 export interface AuthMetadata {
-  clientId: string
-  clientName: string
-  scopes: string[]
-  expiresAt: string
   userRole: UserRole
-  registeredAt: string
-  serverMetadata: OAuthServerMetadata
   userProfile?: UserProfile
   /** Whether a REST API session token is stored in keychain */
   hasSessionToken?: boolean
+  // OAuth-only fields (absent for chatUsers who skip OAuth)
+  clientId?: string
+  clientName?: string
+  scopes?: string[]
+  expiresAt?: string
+  registeredAt?: string
+  serverMetadata?: OAuthServerMetadata
 }
 
 // --- IPC Result Types ---
@@ -89,5 +91,13 @@ export type CredentialLoginErrorCode =
   | 'network_error'
 
 export type CredentialLoginResult =
-  | { success: true; userProfile: UserProfile }
+  | { success: true; userProfile: UserProfile; userRole: UserRole }
   | { success: false; error: string; errorCode: CredentialLoginErrorCode }
+
+// --- Instance Validation (pre-auth URL check) ---
+
+export type ValidateInstanceErrorCode = 'invalid_url' | 'unreachable' | 'not_n8n'
+
+export type ValidateInstanceResult =
+  | { success: true; instanceId: string; hostname: string; hasOAuthSupport: boolean }
+  | { success: false; error: string; errorCode: ValidateInstanceErrorCode }

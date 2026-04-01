@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld('n8nDesk', {
       ipcRenderer.invoke('storage:append', path, line),
   },
   auth: {
+    validateInstance: (instanceUrl: string) =>
+      ipcRenderer.invoke('auth:validate-instance', instanceUrl),
     login: (instanceUrl: string, options?: { forceLocalhost?: boolean }) =>
       ipcRenderer.invoke('auth:login', instanceUrl, options),
     logout: (instanceId: string) =>

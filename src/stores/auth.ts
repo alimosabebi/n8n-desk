@@ -21,7 +21,7 @@ export const useAuthStore = defineStore('auth', () => {
   const userProfile = ref<UserProfile | null>(null)
   const sessionExpired = ref(false)
 
-  const isAuthenticated = computed(() => accessToken.value !== null)
+  const isAuthenticated = computed(() => accessToken.value !== null || sessionToken.value !== null)
   const isFullAccess = computed(() => userRole.value !== 'chatUser' && userRole.value !== 'unknown')
   const hasRestAccess = computed(() => sessionToken.value !== null && !sessionExpired.value)
 
@@ -43,8 +43,8 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     userRole.value = meta.userRole as UserRole
-    scopes.value = meta.scopes
-    expiresAt.value = meta.expiresAt
+    scopes.value = meta.scopes ?? []
+    expiresAt.value = meta.expiresAt ?? null
     userProfile.value = meta.userProfile ?? null
 
     if (window.n8nDesk) {
@@ -118,6 +118,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     if (result.success) {
       userProfile.value = result.userProfile
+      userRole.value = result.userRole as UserRole
       // Load the session token that was just stored
       sessionToken.value = await window.n8nDesk.auth.getSessionToken(instanceId)
       // Load browser-id (created during credential login)

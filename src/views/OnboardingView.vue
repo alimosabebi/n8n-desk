@@ -13,10 +13,11 @@ import { useAuth } from '@/composables/useAuth'
 import { useAuthStore } from '@/stores/auth'
 import { useInstancesStore } from '@/stores/instances'
 import { createApiClient } from '@/services/n8n-api'
+import type { ValidateInstanceResult } from '@/types/auth'
 
 const router = useRouter()
 const { t } = useI18n()
-const { login } = useAuth()
+const { login, registerInstance } = useAuth()
 const authStore = useAuthStore()
 const instancesStore = useInstancesStore()
 
@@ -28,21 +29,28 @@ function goBack(): void {
 }
 
 // --- Step state ---
-const TOTAL_STEPS = 4
+// Steps: 1=URL, 2=Credential Login, 3=OAuth (conditional), 4=Done
+// For chatUsers or instances without OAuth, step 3 is skipped (totalSteps=3)
 const currentStep = ref<1 | 2 | 3 | 4>(1)
+const needsOAuth = ref(false)
+const totalSteps = computed(() => needsOAuth.value ? 4 : 3)
+
+/** Map the visual step number based on whether OAuth is needed */
+function doneStep(): 3 | 4 {
+  return needsOAuth.value ? 4 : 3
+}
 
 // --- Step 1: URL input ---
 const instanceUrl = ref('')
 const urlError = ref<string | null>(null)
 const isValidating = ref(false)
 
-// --- Step 2: OAuth sign-in ---
-const isSigningIn = ref(false)
-const signInError = ref<string | null>(null)
-const signInHostname = ref('')
-const loginInstanceId = ref<string | null>(null)
+// --- Shared instance state (set during validation) ---
+const validatedInstanceId = ref<string | null>(null)
+const validatedHostname = ref('')
+const hasOAuthSupport = ref(false)
 
-// --- Step 3: Credential login ---
+// --- Step 2: Credential login ---
 const credEmail = ref('')
 const credPassword = ref('')
 const credMfaCode = ref('')
@@ -50,7 +58,11 @@ const isMfaRequired = ref(false)
 const isCredLoggingIn = ref(false)
 const credError = ref<string | null>(null)
 
-// --- Step 4: Connected ---
+// --- Step 3: OAuth sign-in (conditional) ---
+const isSigningIn = ref(false)
+const signInError = ref<string | null>(null)
+
+// --- Step 4 (or 3 for chatUsers): Connected ---
 const instanceLabel = ref('')
 const instanceColor = ref('#ff6d5a')
 const agentCount = ref<number | null>(null)
@@ -69,7 +81,7 @@ const stepLabel = computed(() => {
   switch (currentStep.value) {
     case 1: return t('onboarding.stepConnect')
     case 2: return t('onboarding.stepSignIn')
-    case 3: return t('onboarding.stepCredentials')
+    case 3: return needsOAuth.value ? t('onboarding.stepAuthorize') : t('onboarding.stepDone')
     case 4: return t('onboarding.stepDone')
     default: return ''
   }
@@ -112,29 +124,50 @@ async function validateAndConnect(): Promise<void> {
   isValidating.value = true
 
   try {
-    // Test if this is a valid n8n instance by hitting the discovery endpoint
-    const response = await fetch(`${url}/.well-known/oauth-authorization-server`, {
-      signal: AbortSignal.timeout(10000),
-    })
+    // Validate via IPC (handles .well-known check + instance directory creation)
+    let result: ValidateInstanceResult
 
-    if (!response.ok) {
-      urlError.value = t('onboarding.errors.notN8n')
+    if (window.n8nDesk) {
+      result = await window.n8nDesk.auth.validateInstance(url)
+    } else {
+      // Fallback for browser dev mode — direct fetch
+      try {
+        const response = await fetch(`${url}/.well-known/oauth-authorization-server`, {
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!response.ok) {
+          urlError.value = t('onboarding.errors.notN8n')
+          return
+        }
+        const metadata = await response.json()
+        if (!metadata.authorization_endpoint || !metadata.token_endpoint) {
+          urlError.value = t('onboarding.errors.notN8n')
+          return
+        }
+        // In browser dev mode, create a synthetic result
+        result = { success: true, instanceId: 'dev', hostname: new URL(url).hostname, hasOAuthSupport: true }
+      } catch {
+        urlError.value = t('onboarding.errors.unreachable')
+        return
+      }
+    }
+
+    if (!result.success) {
+      if (result.errorCode === 'unreachable') {
+        urlError.value = t('onboarding.errors.unreachable')
+      } else {
+        urlError.value = result.error ?? t('onboarding.errors.notN8n')
+      }
       return
     }
 
-    const metadata = await response.json()
-    if (!metadata.authorization_endpoint || !metadata.token_endpoint) {
-      urlError.value = t('onboarding.errors.notN8n')
-      return
-    }
-
-    // URL is valid — prepare for sign-in
+    // URL is valid — prepare for credential login
     instanceUrl.value = url
-    signInHostname.value = new URL(url).hostname
+    validatedInstanceId.value = result.instanceId
+    validatedHostname.value = result.hostname
+    hasOAuthSupport.value = result.hasOAuthSupport
+    instanceLabel.value = result.hostname
     currentStep.value = 2
-
-    // Auto-start sign-in
-    void startSignIn()
   } catch {
     urlError.value = t('onboarding.errors.unreachable')
   } finally {
@@ -142,7 +175,58 @@ async function validateAndConnect(): Promise<void> {
   }
 }
 
-// --- Step 2: OAuth Sign-In ---
+// --- Step 2: Credential Login ---
+async function submitCredentials(): Promise<void> {
+  if (!validatedInstanceId.value) return
+  credError.value = null
+  isCredLoggingIn.value = true
+
+  try {
+    const result = await authStore.credentialLogin(validatedInstanceId.value, {
+      email: credEmail.value,
+      password: credPassword.value,
+      mfaCode: isMfaRequired.value ? credMfaCode.value : undefined,
+    })
+
+    if (result.success) {
+      // Register instance in stores
+      await registerInstance(validatedInstanceId.value!)
+
+      // Read the instance to get its assigned color
+      const instance = instancesStore.instances.find((i) => i.id === validatedInstanceId.value)
+      if (instance) {
+        instanceColor.value = instance.color
+        instanceLabel.value = instance.label
+      }
+
+      // Determine if OAuth is needed based on role and OAuth support
+      const isFullAccess = authStore.isFullAccess
+      needsOAuth.value = isFullAccess && hasOAuthSupport.value
+
+      if (needsOAuth.value) {
+        // Full-access user → proceed to OAuth step
+        currentStep.value = 3
+        void startSignIn()
+      } else {
+        // chatUser or no OAuth → skip to Done
+        goToConnected()
+      }
+    } else {
+      if (result.errorCode === 'mfa_required') {
+        isMfaRequired.value = true
+        credError.value = null // Clear error, show MFA input instead
+      } else {
+        credError.value = result.error || t('onboarding.errors.credentialsFailed')
+      }
+    }
+  } catch {
+    credError.value = t('onboarding.errors.credentialsFailed')
+  } finally {
+    isCredLoggingIn.value = false
+  }
+}
+
+// --- Step 3: OAuth Sign-In (conditional, only for full-access users) ---
 async function startSignIn(options?: { forceLocalhost?: boolean }): Promise<void> {
   signInError.value = null
   isSigningIn.value = true
@@ -151,18 +235,7 @@ async function startSignIn(options?: { forceLocalhost?: boolean }): Promise<void
     const result = await login(instanceUrl.value, options)
 
     if (result.success) {
-      loginInstanceId.value = result.instanceId
-      instanceLabel.value = signInHostname.value
-
-      // Read the instance to get its assigned color
-      const instance = instancesStore.instances.find((i) => i.id === result.instanceId)
-      if (instance) {
-        instanceColor.value = instance.color
-        instanceLabel.value = instance.label
-      }
-
-      // Move to credential login step
-      currentStep.value = 3
+      goToConnected()
     } else {
       if (result.errorCode === 'auth_timeout') {
         signInError.value = t('onboarding.errors.authTimeout')
@@ -179,42 +252,18 @@ async function startSignIn(options?: { forceLocalhost?: boolean }): Promise<void
   }
 }
 
-// --- Step 3: Credential Login ---
-async function submitCredentials(): Promise<void> {
-  if (!loginInstanceId.value) return
-  credError.value = null
-  isCredLoggingIn.value = true
-
-  try {
-    const result = await authStore.credentialLogin(loginInstanceId.value, {
-      email: credEmail.value,
-      password: credPassword.value,
-      mfaCode: isMfaRequired.value ? credMfaCode.value : undefined,
-    })
-
-    if (result.success) {
-      goToConnected()
-    } else {
-      if (result.errorCode === 'mfa_required') {
-        isMfaRequired.value = true
-        credError.value = null // Clear error, show MFA input instead
-      } else {
-        credError.value = result.error || t('onboarding.errors.credentialsFailed')
-      }
-    }
-  } catch {
-    credError.value = t('onboarding.errors.credentialsFailed')
-  } finally {
-    isCredLoggingIn.value = false
-  }
+function skipOAuth(): void {
+  // User chose to skip OAuth — they'll have Chat-only until they authorize later
+  needsOAuth.value = false
+  goToConnected()
 }
 
 function goToConnected(): void {
-  currentStep.value = 4
+  currentStep.value = doneStep()
   void discoverAgents()
 }
 
-// --- Step 4: Agent Discovery ---
+// --- Done step: Agent Discovery ---
 async function discoverAgents(): Promise<void> {
   isDiscovering.value = true
   try {
@@ -235,8 +284,8 @@ async function discoverAgents(): Promise<void> {
 }
 
 async function updateInstanceAndFinish(): Promise<void> {
-  if (loginInstanceId.value) {
-    await instancesStore.updateInstance(loginInstanceId.value, {
+  if (validatedInstanceId.value) {
+    await instancesStore.updateInstance(validatedInstanceId.value, {
       label: instanceLabel.value,
       color: instanceColor.value,
     })
@@ -245,8 +294,6 @@ async function updateInstanceAndFinish(): Promise<void> {
 }
 
 function retryWithLocalhost(): void {
-  // Cancel the current sign-in attempt and restart using localhost HTTP callback
-  // This bypasses the custom protocol handler which may not work on all systems
   isSigningIn.value = false
   void startSignIn({ forceLocalhost: true })
 }
@@ -254,7 +301,13 @@ function retryWithLocalhost(): void {
 function goBackToStep1(): void {
   currentStep.value = 1
   signInError.value = null
+  credError.value = null
   urlError.value = null
+}
+
+function goBackToStep2(): void {
+  currentStep.value = 2
+  signInError.value = null
 }
 </script>
 
@@ -275,7 +328,7 @@ function goBackToStep1(): void {
         <!-- Step indicator -->
         <div class="step-indicator">
           <div
-            v-for="step in TOTAL_STEPS"
+            v-for="step in totalSteps"
             :key="step"
             class="step-dot"
             :class="{ 'step-dot--active': currentStep >= step }"
@@ -312,40 +365,11 @@ function goBackToStep1(): void {
           </ion-button>
         </div>
 
-        <!-- Step 2: Sign In (OAuth) -->
+        <!-- Step 2: Credential Login -->
         <div v-if="currentStep === 2" class="step-content">
-          <h2 class="step-title">{{ t('onboarding.stepSignInTitle') }}</h2>
-
-          <div v-if="isSigningIn" class="signing-in">
-            <ion-spinner name="crescent" class="sign-in-spinner" />
-            <p class="sign-in-text">{{ t('onboarding.signingIn', { hostname: signInHostname }) }}</p>
-            <p class="sign-in-hint">{{ t('onboarding.signInHint') }}</p>
-            <button class="trouble-link" @click="retryWithLocalhost">
-              {{ t('onboarding.havingTrouble') }} {{ t('onboarding.tryBrowserVerification') }}
-            </button>
-          </div>
-
-          <div v-if="signInError" class="sign-in-error">
-            <ion-icon :icon="alertCircle" color="danger" class="error-icon" />
-            <ion-text color="danger">
-              <p>{{ signInError }}</p>
-            </ion-text>
-            <div class="error-actions">
-              <ion-button @click="startSignIn" :disabled="isSigningIn">
-                {{ t('onboarding.tryAgain') }}
-              </ion-button>
-              <ion-button fill="outline" @click="goBackToStep1">
-                {{ t('onboarding.changeUrl') }}
-              </ion-button>
-            </div>
-          </div>
-        </div>
-
-        <!-- Step 3: Credential Login -->
-        <div v-if="currentStep === 3" class="step-content">
           <div class="credentials-header">
             <ion-icon :icon="lockClosed" class="credentials-icon" />
-            <h2 class="step-title">{{ t('onboarding.stepCredentialsTitle') }}</h2>
+            <h2 class="step-title">{{ t('onboarding.stepSignInTitle', { hostname: validatedHostname }) }}</h2>
           </div>
           <p class="step-description">{{ t('onboarding.credentialsHelp') }}</p>
 
@@ -400,14 +424,56 @@ function goBackToStep1(): void {
             <span v-else>{{ t('onboarding.signInButton') }}</span>
           </ion-button>
 
+          <button class="back-link" @click="goBackToStep1">
+            {{ t('onboarding.changeUrl') }}
+          </button>
         </div>
 
-        <!-- Step 4: Connected -->
-        <div v-if="currentStep === 4" class="step-content">
+        <!-- Step 3: OAuth Authorization (only for full-access users) -->
+        <div v-if="currentStep === 3 && needsOAuth" class="step-content">
+          <h2 class="step-title">{{ t('onboarding.stepAuthorizeTitle') }}</h2>
+          <p class="step-description">{{ t('onboarding.authorizeHelp') }}</p>
+
+          <div v-if="isSigningIn" class="signing-in">
+            <ion-spinner name="crescent" class="sign-in-spinner" />
+            <p class="sign-in-text">{{ t('onboarding.authorizing', { hostname: validatedHostname }) }}</p>
+            <p class="sign-in-hint">{{ t('onboarding.signInHint') }}</p>
+            <button class="trouble-link" @click="retryWithLocalhost">
+              {{ t('onboarding.havingTrouble') }} {{ t('onboarding.tryBrowserVerification') }}
+            </button>
+          </div>
+
+          <div v-if="signInError" class="sign-in-error">
+            <ion-icon :icon="alertCircle" color="danger" class="error-icon" />
+            <ion-text color="danger">
+              <p>{{ signInError }}</p>
+            </ion-text>
+            <div class="error-actions">
+              <ion-button @click="startSignIn" :disabled="isSigningIn">
+                {{ t('onboarding.tryAgain') }}
+              </ion-button>
+              <ion-button fill="outline" @click="skipOAuth">
+                {{ t('onboarding.skipForNow') }}
+              </ion-button>
+            </div>
+          </div>
+
+          <div v-if="!isSigningIn && !signInError" class="oauth-actions">
+            <button class="skip-link" @click="skipOAuth">
+              {{ t('onboarding.skipForNow') }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Done step (step 3 for chatUsers, step 4 for full-access) -->
+        <div v-if="currentStep === doneStep()" class="step-content">
           <div class="connected-header">
             <ion-icon :icon="checkmarkCircle" color="success" class="connected-icon" />
             <h2 class="step-title">{{ t('onboarding.connected') }}</h2>
           </div>
+          <p class="step-description">
+            {{ authStore.isFullAccess ? t('onboarding.connectedFullAccess') : t('onboarding.connectedChatOnly') }}
+          </p>
 
           <ion-input
             v-model="instanceLabel"
@@ -513,6 +579,47 @@ function goBackToStep1(): void {
 }
 
 // Step 2
+.credentials-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing--xs);
+}
+
+.credentials-icon {
+  font-size: 40px;
+  color: var(--color--primary);
+}
+
+.cred-error {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing--xs);
+
+  p {
+    margin: 0;
+    font-size: var(--font-size--sm);
+  }
+}
+
+.back-link,
+.skip-link {
+  margin-top: var(--spacing--xs);
+  background: none;
+  border: none;
+  color: var(--color--text--tint-1);
+  font-size: var(--font-size--2xs);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+  align-self: center;
+
+  &:hover {
+    color: var(--color--primary);
+  }
+}
+
+// Step 3 (OAuth)
 .signing-in {
   display: flex;
   flex-direction: column;
@@ -573,31 +680,12 @@ function goBackToStep1(): void {
   margin-top: var(--spacing--sm);
 }
 
-// Step 3
-.credentials-header {
+.oauth-actions {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--spacing--xs);
+  justify-content: center;
 }
 
-.credentials-icon {
-  font-size: 40px;
-  color: var(--color--primary);
-}
-
-.cred-error {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing--xs);
-
-  p {
-    margin: 0;
-    font-size: var(--font-size--sm);
-  }
-}
-
-// Step 4
+// Done step
 .connected-header {
   display: flex;
   flex-direction: column;

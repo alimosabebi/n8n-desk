@@ -12,6 +12,21 @@ export function useAuth() {
   const userRole = computed(() => authStore.userRole)
 
   /**
+   * Register an instance in the stores after it has been created on disk.
+   * Called during onboarding after validate-instance or credential login.
+   */
+  async function registerInstance(instanceId: string): Promise<void> {
+    const { localStorageService } = await import('@/services/local-storage')
+    const instanceConfig = await localStorageService.readJson<import('@/types/instance').Instance>(
+      `instances/${instanceId}/instance.json`
+    )
+    if (instanceConfig) {
+      await instancesStore.addInstance(instanceConfig)
+      await instancesStore.setActive(instanceConfig.id)
+    }
+  }
+
+  /**
    * Initiate OAuth login for an n8n instance URL.
    * On success, adds the instance and hydrates auth state.
    */
@@ -19,16 +34,9 @@ export function useAuth() {
     const result = await authStore.login(instanceUrl, options)
 
     if (result.success) {
-      // Read the instance config from disk (written by the main process during login)
-      // and add it to the instances store
-      const { localStorageService } = await import('@/services/local-storage')
-      const instanceConfig = await localStorageService.readJson<import('@/types/instance').Instance>(
-        `instances/${result.instanceId}/instance.json`
-      )
-      if (instanceConfig) {
-        await instancesStore.addInstance(instanceConfig)
-        await instancesStore.setActive(instanceConfig.id)
-      }
+      // Instance may already be registered (from validate-instance step).
+      // addInstance handles duplicates by updating.
+      await registerInstance(result.instanceId)
     }
 
     return result
@@ -51,6 +59,13 @@ export function useAuth() {
   async function ensureAuthenticated(): Promise<boolean> {
     if (!authStore.isAuthenticated) return false
 
+    // chatUser: session-only auth, no MCP token to refresh
+    if (authStore.sessionToken && !authStore.accessToken) {
+      return !authStore.sessionExpired
+    }
+
+    if (!authStore.accessToken) return false
+
     if (authStore.isTokenExpired) {
       const activeId = instancesStore.activeInstanceId
       if (!activeId) return false
@@ -68,6 +83,7 @@ export function useAuth() {
     userRole,
     login,
     logout,
+    registerInstance,
     ensureAuthenticated,
   }
 }

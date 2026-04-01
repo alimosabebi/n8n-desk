@@ -53,20 +53,31 @@ interface OAuthServerMetadata {
 }
 
 interface AuthMetadata {
-  clientId: string
-  clientName: string
-  scopes: string[]
-  expiresAt: string
   userRole: string
-  registeredAt: string
-  serverMetadata: OAuthServerMetadata
   userProfile?: { firstName: string; lastName: string; email: string }
   hasSessionToken?: boolean
+  // OAuth-only fields (absent for chatUsers who skip OAuth)
+  clientId?: string
+  clientName?: string
+  scopes?: string[]
+  expiresAt?: string
+  registeredAt?: string
+  serverMetadata?: OAuthServerMetadata
 }
 
 interface CredentialLoginResult {
   success: boolean
   userProfile?: { firstName: string; lastName: string; email: string }
+  userRole?: string
+  error?: string
+  errorCode?: string
+}
+
+interface ValidateInstanceResult {
+  success: boolean
+  instanceId?: string
+  hostname?: string
+  hasOAuthSupport?: boolean
   error?: string
   errorCode?: string
 }
@@ -209,6 +220,19 @@ function pickColor(existingCount: number): string {
   return INSTANCE_COLORS[existingCount % INSTANCE_COLORS.length]
 }
 
+// --- Role mapping ---
+
+/** Map n8n's role slug (e.g. 'global:owner') to our UserRole type */
+function mapN8nRole(slug: string | undefined): string {
+  const map: Record<string, string> = {
+    'global:owner': 'owner',
+    'global:admin': 'admin',
+    'global:member': 'member',
+    'global:chatUser': 'chatUser',
+  }
+  return map[slug ?? ''] ?? 'unknown'
+}
+
 // --- IPC Handlers ---
 
 let handlersRegistered = false
@@ -216,6 +240,89 @@ let handlersRegistered = false
 export function registerAuthHandlers(): void {
   if (handlersRegistered) return
   handlersRegistered = true
+
+  // --- auth:validate-instance ---
+  // Validates an n8n instance URL and creates the instance directory early.
+  // Called during onboarding step 1, before any auth flow.
+  ipcMain.handle('auth:validate-instance', async (_event, instanceUrl: string): Promise<ValidateInstanceResult> => {
+    try {
+      // 1. Normalize URL
+      const url = instanceUrl.replace(/\/+$/, '')
+
+      let hostname: string
+      try {
+        hostname = new URL(url).hostname
+      } catch {
+        return { success: false, error: 'Invalid URL format.', errorCode: 'invalid_url' }
+      }
+
+      // 2. Generate instance ID
+      const instanceId = generateInstanceId(url)
+      const instDir = instanceDir(instanceId)
+
+      // 3. Try OAuth discovery endpoint (confirms n8n + OAuth support)
+      let hasOAuthSupport = false
+      let serverMetadata: OAuthServerMetadata | undefined
+      try {
+        serverMetadata = await discoverServer(url)
+        hasOAuthSupport = true
+      } catch {
+        // OAuth discovery failed — try a HEAD request as fallback to confirm it's reachable
+        try {
+          const headResponse = await fetch(url, {
+            method: 'HEAD',
+            signal: AbortSignal.timeout(10000),
+          })
+          if (!headResponse.ok && headResponse.status >= 500) {
+            return { success: false, error: `Server error at ${url}.`, errorCode: 'unreachable' }
+          }
+          // Reachable but no OAuth — the user can still do credential login for Chat
+        } catch {
+          return {
+            success: false,
+            error: `Can't reach ${url}. Check the address and try again.`,
+            errorCode: 'unreachable',
+          }
+        }
+      }
+
+      // 4. Write instance config
+      let existingIds: string[] = []
+      try {
+        const indexPath = path.join(BASE_DIR, 'instances', 'index.json')
+        const content = await fs.readFile(indexPath, 'utf-8')
+        existingIds = JSON.parse(content) as string[]
+      } catch {
+        // No index yet
+      }
+
+      const instanceConfig = {
+        id: instanceId,
+        label: hostname,
+        url,
+        color: pickColor(existingIds.length),
+        addedAt: new Date().toISOString(),
+      }
+      await writeJson(path.join(instDir, 'instance.json'), instanceConfig)
+
+      // 5. Update instance index
+      await updateInstanceIndex(instanceId, 'add')
+
+      // 6. Cache server metadata in auth.json if OAuth is supported
+      if (serverMetadata) {
+        const authMeta: Partial<AuthMetadata> = {
+          userRole: 'unknown',
+          serverMetadata,
+        }
+        await writeJson(path.join(instDir, 'auth.json'), authMeta)
+      }
+
+      return { success: true, instanceId, hostname, hasOAuthSupport }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      return { success: false, error: message, errorCode: 'unreachable' }
+    }
+  })
 
   // --- auth:login ---
   ipcMain.handle('auth:login', async (_event, instanceUrl: string, options?: { forceLocalhost?: boolean }): Promise<AuthLoginResult> => {
@@ -378,7 +485,7 @@ export function registerAuthHandlers(): void {
     const authMeta = await readJson<AuthMetadata>(path.join(instDir, 'auth.json'))
     const tokens = await readTokens(instanceId)
 
-    if (authMeta && tokens && authMeta.serverMetadata) {
+    if (authMeta && tokens && authMeta.serverMetadata && authMeta.clientId) {
       const metadata = authMeta.serverMetadata
       // Revoke both tokens (best-effort)
       await revokeToken(metadata, authMeta.clientId, tokens.access_token, 'access_token')
@@ -406,6 +513,10 @@ export function registerAuthHandlers(): void {
 
       if (!authMeta || !tokens) {
         return { success: false, error: 'No auth data found. Please sign in again.' }
+      }
+
+      if (!authMeta.serverMetadata || !authMeta.clientId) {
+        return { success: false, error: 'No OAuth data found. MCP OAuth may not have been completed.' }
       }
 
       const metadata = authMeta.serverMetadata
@@ -551,12 +662,13 @@ export function registerAuthHandlers(): void {
           }
         }
 
-        // Parse the response body for user profile
+        // Parse the response body for user profile and role
         const userData = await response.json() as {
           data?: {
             firstName?: string
             lastName?: string
             email?: string
+            role?: string
           }
         }
 
@@ -584,15 +696,21 @@ export function registerAuthHandlers(): void {
           email: userData.data?.email ?? '',
         }
 
-        // Update auth.json with profile + session flag
-        const authMeta = await readJson<AuthMetadata>(path.join(instDir, 'auth.json'))
-        if (authMeta) {
-          authMeta.userProfile = userProfile
-          authMeta.hasSessionToken = true
-          await writeJson(path.join(instDir, 'auth.json'), authMeta)
-        }
+        // Detect user role from login response
+        const userRole = mapN8nRole(userData.data?.role)
 
-        return { success: true, userProfile }
+        // Update auth.json with profile, role, and session flag
+        // Create a minimal auth.json if none exists (credential login before OAuth)
+        const existingMeta = await readJson<AuthMetadata>(path.join(instDir, 'auth.json'))
+        const authMeta: AuthMetadata = {
+          ...(existingMeta ?? {}),
+          userRole,
+          userProfile,
+          hasSessionToken: true,
+        }
+        await writeJson(path.join(instDir, 'auth.json'), authMeta)
+
+        return { success: true, userProfile, userRole }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Login failed'
         return { success: false, error: message, errorCode: 'network_error' }
