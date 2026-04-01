@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+declare module 'pdf-parse/lib/pdf-parse.js' {
+  import type pdfParse from 'pdf-parse'
+  const fn: typeof pdfParse
+  export default fn
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
   const component: DefineComponent<Record<string, never>, Record<string, never>, unknown>

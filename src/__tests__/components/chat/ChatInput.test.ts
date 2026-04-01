@@ -13,7 +13,7 @@ describe('ChatInput', () => {
       await textarea.setValue('  Hello  ')
       await wrapper.find('button[aria-label="Send message"]').trigger('click')
 
-      expect(wrapper.emitted('send')).toEqual([['Hello']])
+      expect(wrapper.emitted('send')).toEqual([['Hello', []]])
     })
 
     it('emits send on Enter key', async () => {
@@ -22,7 +22,7 @@ describe('ChatInput', () => {
       await textarea.setValue('Test message')
       await textarea.trigger('keydown', { key: 'Enter', shiftKey: false })
 
-      expect(wrapper.emitted('send')).toEqual([['Test message']])
+      expect(wrapper.emitted('send')).toEqual([['Test message', []]])
     })
 
     it('does not emit send on Shift+Enter', async () => {

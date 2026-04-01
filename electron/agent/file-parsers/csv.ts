@@ -126,7 +126,7 @@ export async function readCsv(
     if (parseResult.errors.length > 0) {
       // Filter to critical errors (missing quotes, etc.) — row-level warnings are okay
       const criticalErrors = parseResult.errors.filter(
-        (e: { type: string; row: number; message: string }) =>
+        (e: { type: string; row?: number; message: string }) =>
           e.type === 'Quotes' || e.type === 'FieldMismatch',
       )
       if (criticalErrors.length > 0 && parseResult.data.length === 0) {
@@ -203,7 +203,7 @@ export async function writeCsv(
     // Lazy-load papaparse
     const Papa = await import('papaparse')
 
-    serialized = Papa.unparse(data, {
+    serialized = Papa.unparse(data as Record<string, unknown>[], {
       delimiter,
       header,
       escapeFormulae: true,
