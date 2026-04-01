@@ -198,8 +198,11 @@ async function parsePdfBuffer(
   buffer: Buffer,
   options: ReadPdfOptions,
 ): Promise<Omit<ReadPdfResult, 'sizeBytes'>> {
-  // Lazy-load pdf-parse to avoid loading the library for agents that don't need PDF
-  const pdfParse = await import('pdf-parse')
+  // Lazy-load pdf-parse to avoid loading the library for agents that don't need PDF.
+  // Import from 'pdf-parse/lib/pdf-parse.js' instead of 'pdf-parse' to avoid
+  // a known v1.1.1 bug: index.js checks `!module.parent` which is undefined in
+  // ESM context, triggering test code that reads a non-existent file.
+  const pdfParse = await import('pdf-parse/lib/pdf-parse.js')
 
   const pageFilter = parsePageRange(options.pages)
   const collectedPages: PdfPageData[] = []
