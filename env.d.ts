@@ -1,5 +1,11 @@
 /// <reference types="vite/client" />
 
+declare module 'pdf-parse/lib/pdf-parse.js' {
+  import type pdfParse from 'pdf-parse'
+  const fn: typeof pdfParse
+  export default fn
+}
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'
   const component: DefineComponent<Record<string, never>, Record<string, never>, unknown>
@@ -8,7 +14,7 @@ declare module '*.vue' {
 
 interface N8nDeskBridge {
   agent: {
-    invoke: (sessionId: string, message: string) => Promise<{ success: boolean; error?: string }>
+    invoke: (sessionId: string, message: string, options?: { attachedFolders?: { path: string; label: string; mode: 'ro' | 'rw' }[]; mode?: 'cowork' | 'workflow' }) => Promise<{ success: boolean; error?: string }>
     stop: (sessionId: string) => Promise<{ success: boolean }>
     approve: (sessionId: string, decision: 'approve' | 'reject') => Promise<{ success: boolean; error?: string }>
     testConnection: () => Promise<{ success: boolean; error?: string }>
@@ -105,6 +111,9 @@ interface N8nDeskBridge {
     saveSkill: (skill: { name: string; content: string }) =>
       Promise<{ success: true } | { success: false; error: string }>
     deleteSkill: (name: string) => Promise<{ success: true } | { success: false; error: string }>
+  }
+  dialog: {
+    openFolder: () => Promise<string | null>
   }
 }
 

@@ -9,6 +9,8 @@ import type {
   LoadedSkill,
 } from './types'
 import { createMcpTools } from './tool-definitions'
+import { createFileTools } from './file-tools'
+import { jsComputeTool } from './js-sandbox'
 import { substituteArguments } from '../skill-loader'
 
 // Destructive MCP tools that require user approval before execution
@@ -102,6 +104,46 @@ export class DeepAgentsRunner implements AgentRunner {
   private abortControllers = new Map<string, AbortController>()
   private pendingApprovals = new Map<string, PendingApproval>()
 
+  /**
+   * Build a Deep Agents backend function based on the sandbox policy.
+   *
+   * When a sandboxPolicy is present, creates a CompositeBackend that routes
+   * file access through FilesystemBackend instances for each mount, with
+   * StateBackend as the default for ephemeral scratch files.
+   *
+   * When no sandboxPolicy is set, returns a plain StateBackend (no regression).
+   */
+  private buildBackend(
+    config: AgentRunnerConfig,
+    StateBackendCtor: typeof import('deepagents').StateBackend,
+    CompositeBackendCtor: typeof import('deepagents').CompositeBackend,
+    FilesystemBackendCtor: typeof import('deepagents').FilesystemBackend,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): (rt: any) => any {
+    if (!config.sandboxPolicy) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (rt: any) => new StateBackendCtor(rt)
+    }
+
+    const policy = config.sandboxPolicy
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (rt: any) => {
+      const routes: Record<string, InstanceType<typeof FilesystemBackendCtor>> = {}
+      for (const mount of policy.mounts) {
+        routes[mount.virtualPrefix] = new FilesystemBackendCtor({
+          rootDir: mount.hostPath,
+          virtualMode: true,
+        })
+      }
+
+      return new CompositeBackendCtor(
+        new StateBackendCtor(rt),
+        routes,
+      )
+    }
+  }
+
   async *invoke(
     sessionId: string,
     message: string,
@@ -110,12 +152,16 @@ export class DeepAgentsRunner implements AgentRunner {
     // Lazy imports for ESM-only packages
     let createDeepAgent: typeof import('deepagents').createDeepAgent
     let StateBackend: typeof import('deepagents').StateBackend
+    let CompositeBackend: typeof import('deepagents').CompositeBackend
+    let FilesystemBackend: typeof import('deepagents').FilesystemBackend
     let MemorySaver: typeof import('@langchain/langgraph').MemorySaver
 
     try {
       const deepagents = await import('deepagents')
       createDeepAgent = deepagents.createDeepAgent
       StateBackend = deepagents.StateBackend
+      CompositeBackend = deepagents.CompositeBackend
+      FilesystemBackend = deepagents.FilesystemBackend
       const langgraph = await import('@langchain/langgraph')
       MemorySaver = langgraph.MemorySaver
     } catch (err) {
@@ -138,11 +184,20 @@ export class DeepAgentsRunner implements AgentRunner {
       // Create the LLM chat model
       const chatModel = await createChatModel(config.llmConfig)
 
-      // Create MCP tool wrappers and merge custom tools
+      // Build tools array: file tools + js_compute (if sandbox) → MCP tools → custom tools
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const tools: any[] = [
-        ...createMcpTools(config.instanceUrl, config.accessToken),
-      ]
+      const tools: any[] = []
+
+      // Prepend file format tools and js_compute when sandbox policy is present.
+      // These are NOT added to DESTRUCTIVE_TOOLS or interruptOn — the folder
+      // attachment is the trust grant, no per-operation approval needed.
+      if (config.sandboxPolicy) {
+        tools.push(...createFileTools(config.sandboxPolicy))
+        tools.push(jsComputeTool)
+      }
+
+      // MCP workflow tools (require approval via DESTRUCTIVE_TOOLS)
+      tools.push(...createMcpTools(config.instanceUrl, config.accessToken))
 
       // Merge pre-built LangChain tools from PluginManager.buildDeepAgentsTools()
       if (config.customTools && config.customTools.length > 0) {
@@ -167,8 +222,7 @@ export class DeepAgentsRunner implements AgentRunner {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         tools: tools as any,
         systemPrompt: config.systemPrompt,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        backend: (rt: any) => new StateBackend(rt),
+        backend: this.buildBackend(config, StateBackend, CompositeBackend, FilesystemBackend),
         checkpointer: new MemorySaver(),
         interruptOn: Object.fromEntries(interruptTools.map((t) => [t, true])),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

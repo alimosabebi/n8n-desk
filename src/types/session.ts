@@ -1,3 +1,13 @@
+/** A folder attached to a session for agent filesystem access. */
+export interface AttachedFolder {
+  /** Absolute path to the folder on the host filesystem */
+  path: string
+  /** Display label (typically the folder basename) */
+  label: string
+  /** Access mode: 'ro' for read-only, 'rw' for read-write */
+  mode: 'ro' | 'rw'
+}
+
 export interface SessionMeta {
   id: string
   title: string
@@ -7,6 +17,8 @@ export interface SessionMeta {
   createdAt: string
   updatedAt: string
   messageCount: number
+  /** Folders attached to this session for agent filesystem access */
+  attachedFolders?: AttachedFolder[]
 }
 
 export interface ChatSessionMeta extends SessionMeta {

@@ -2,8 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('n8nDesk', {
   agent: {
-    invoke: (sessionId: string, message: string) =>
-      ipcRenderer.invoke('agent:invoke', sessionId, message),
+    invoke: (sessionId: string, message: string, options?: { attachedFolders?: { path: string; label: string; mode: 'ro' | 'rw' }[]; mode?: 'cowork' | 'workflow' }) =>
+      ipcRenderer.invoke('agent:invoke', sessionId, message, options),
     stop: (sessionId: string) =>
       ipcRenderer.invoke('agent:stop', sessionId),
     approve: (sessionId: string, decision: 'approve' | 'reject') =>
@@ -134,5 +134,9 @@ contextBridge.exposeInMainWorld('n8nDesk', {
       ipcRenderer.invoke('plugins:save-skill', skill),
     deleteSkill: (name: string) =>
       ipcRenderer.invoke('plugins:delete-skill', name),
+  },
+  dialog: {
+    openFolder: () =>
+      ipcRenderer.invoke('dialog:open-folder'),
   },
 })

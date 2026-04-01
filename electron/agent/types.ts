@@ -108,6 +108,26 @@ export interface ConversationMessage {
   content: string
 }
 
+// --- Filesystem Sandbox ---
+
+/** A folder mounted into the agent's sandbox with a specific access mode. */
+export interface SandboxFolderMount {
+  /** Absolute path on the host filesystem */
+  hostPath: string
+  /** Virtual prefix exposed to the agent (e.g., '/workspace/') */
+  virtualPrefix: string
+  /** Access mode: 'ro' for read-only, 'rw' for read-write */
+  mode: 'ro' | 'rw'
+}
+
+/** Per-session filesystem sandbox policy controlling which folders the agent can access. */
+export interface FilesystemSandboxPolicy {
+  /** Folder mounts granted to this session */
+  mounts: SandboxFolderMount[]
+  /** Absolute path to the ~/.n8n-desk/ directory (always mounted as ro, minus sensitive files) */
+  n8nDeskDir: string
+}
+
 // --- Agent Runner Configuration ---
 
 export interface AgentRunnerConfig {
@@ -124,6 +144,8 @@ export interface AgentRunnerConfig {
   customTools?: unknown[]
   /** Loaded skills for Deep Agents invoke_skill tool */
   skills?: LoadedSkill[]
+  /** Per-session filesystem sandbox policy for file access control */
+  sandboxPolicy?: FilesystemSandboxPolicy
 }
 
 // --- Agent Runner Interface ---
