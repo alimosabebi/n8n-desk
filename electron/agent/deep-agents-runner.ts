@@ -11,7 +11,7 @@ import type {
 import { createMcpTools } from './tool-definitions'
 import { createFileTools } from './file-tools'
 import { jsComputeTool } from './js-sandbox'
-import { substituteArguments } from '../skill-loader'
+import { substituteArguments, readSupportingFile } from '../skill-loader'
 
 // Destructive MCP tools that require user approval before execution
 const DESTRUCTIVE_TOOLS = new Set([
@@ -82,10 +82,38 @@ function createInvokeSkillTool(skills: LoadedSkill[]): any {
     },
     {
       name: 'invoke_skill',
-      description: 'Load and invoke a skill by name. Returns the full skill instructions with arguments substituted.',
+      description: 'Load a skill by name. Returns the full instructions with arguments substituted. If the content references additional files (e.g., [PATTERNS.md](PATTERNS.md)), use read_skill_file to load them.',
       schema: z.object({
         skillName: z.string().describe('The kebab-case name of the skill to invoke'),
         arguments: z.string().optional().describe('Arguments to substitute into the skill content'),
+      }),
+    },
+  )
+}
+
+/**
+ * Create the `read_skill_file` LangChain tool for Deep Agents.
+ *
+ * Allows the agent to read supporting files referenced by a skill
+ * (e.g., PATTERNS.md, SDK-API.md). Resolves relative paths within
+ * the skill's directory with directory traversal protection.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createReadSkillFileTool(skills: LoadedSkill[]): any {
+  return tool(
+    async ({ skillName, filePath }: { skillName: string; filePath: string }) => {
+      const skill = skills.find((s) => s.name === skillName)
+      if (!skill) return `Skill "${skillName}" not found.`
+      const content = await readSupportingFile(skill, filePath)
+      if (content === null) return `File "${filePath}" not found in skill "${skillName}".`
+      return content
+    },
+    {
+      name: 'read_skill_file',
+      description: 'Read a supporting file referenced by a skill (e.g., PATTERNS.md, SDK-API.md). Use when invoke_skill returns content that references additional files.',
+      schema: z.object({
+        skillName: z.string().describe('The skill name that owns this file'),
+        filePath: z.string().describe('Relative path within the skill directory (e.g., "PATTERNS.md")'),
       }),
     },
   )
@@ -204,9 +232,10 @@ export class DeepAgentsRunner implements AgentRunner {
         tools.push(...config.customTools)
       }
 
-      // Add invoke_skill tool when skills are configured
+      // Add invoke_skill and read_skill_file tools when skills are configured
       if (config.skills && config.skills.length > 0) {
         tools.push(createInvokeSkillTool(config.skills))
+        tools.push(createReadSkillFileTool(config.skills))
       }
 
       // Determine which tools require approval (includes approval-required server tools)

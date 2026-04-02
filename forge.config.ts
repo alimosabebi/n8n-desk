@@ -5,6 +5,7 @@ const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
     name: 'n8n-desk',
+    extraResource: ['skills/plugins'],
   },
   makers: [
     new MakerZIP({}, ['darwin', 'linux', 'win32']),

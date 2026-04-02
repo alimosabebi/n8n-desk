@@ -1,8 +1,9 @@
 import http from 'http'
 import type { AddressInfo } from 'net'
-import type { FilesystemSandboxPolicy } from './types'
+import type { FilesystemSandboxPolicy, LoadedSkill } from './types'
 import { createFileTools } from './file-tools'
 import { jsComputeTool } from './js-sandbox'
+import { substituteArguments, readSupportingFile } from '../skill-loader'
 
 // --- Types ---
 
@@ -34,6 +35,8 @@ type McpServerInstance = any
  * Tools registered:
  * - 13 file format tools (read/write Excel, CSV, PDF, docx, JSON, YAML, text)
  * - js_compute (sandboxed JavaScript execution)
+ * - invoke_skill (load skill content by name, when skills are provided)
+ * - read_skill_file (read supporting files from a skill directory)
  *
  * None of these tools require human-in-the-loop approval — they are NOT
  * intercepted by the canUseTool callback in ClaudeSdkRunner.
@@ -43,7 +46,10 @@ export class LocalMcpServer {
   private mcpServer: McpServerInstance = null
   private port = 0
 
-  constructor(private readonly policy: FilesystemSandboxPolicy) {}
+  constructor(
+    private readonly policy: FilesystemSandboxPolicy,
+    private readonly skills: LoadedSkill[] = [],
+  ) {}
 
   /**
    * Start the MCP server on a random localhost port.
@@ -187,5 +193,74 @@ export class LocalMcpServer {
         this.mcpServer.tool(name, description, handler)
       }
     }
+
+    // Register skill tools when skills are configured
+    this.registerSkillTools()
+  }
+
+  /**
+   * Register invoke_skill and read_skill_file as MCP tools.
+   * These mirror the LangChain tools in DeepAgentsRunner, keeping both
+   * agent backends in sync (per CLAUDE.md: both backends must stay in sync).
+   */
+  private registerSkillTools(): void {
+    if (this.skills.length === 0) return
+
+    const { z } = require('zod')
+    const skills = this.skills
+
+    // invoke_skill — load skill content by name
+    this.mcpServer.tool(
+      'invoke_skill',
+      'Load a skill by name. Returns the full instructions with arguments substituted. If the content references additional files (e.g., [PATTERNS.md](PATTERNS.md)), use read_skill_file to load them.',
+      {
+        skillName: z.string().describe('The kebab-case name of the skill to invoke'),
+        arguments: z.string().optional().describe('Arguments to substitute into the skill content'),
+      },
+      async (args: { skillName: string; arguments?: string }) => {
+        const skill = skills.find((s) => s.name === args.skillName)
+        if (!skill) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${args.skillName}" not found.` }],
+            isError: true,
+          }
+        }
+        return {
+          content: [{
+            type: 'text' as const,
+            text: substituteArguments(skill.content, args.arguments ?? ''),
+          }],
+        }
+      },
+    )
+
+    // read_skill_file — read supporting files from a skill directory
+    this.mcpServer.tool(
+      'read_skill_file',
+      'Read a supporting file referenced by a skill (e.g., PATTERNS.md, SDK-API.md). Use when invoke_skill returns content that references additional files.',
+      {
+        skillName: z.string().describe('The skill name that owns this file'),
+        filePath: z.string().describe('Relative path within the skill directory (e.g., "PATTERNS.md")'),
+      },
+      async (args: { skillName: string; filePath: string }) => {
+        const skill = skills.find((s) => s.name === args.skillName)
+        if (!skill) {
+          return {
+            content: [{ type: 'text' as const, text: `Skill "${args.skillName}" not found.` }],
+            isError: true,
+          }
+        }
+        const content = await readSupportingFile(skill, args.filePath)
+        if (content === null) {
+          return {
+            content: [{ type: 'text' as const, text: `File "${args.filePath}" not found in skill "${args.skillName}".` }],
+            isError: true,
+          }
+        }
+        return {
+          content: [{ type: 'text' as const, text: content }],
+        }
+      },
+    )
   }
 }

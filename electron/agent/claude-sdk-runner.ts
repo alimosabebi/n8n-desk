@@ -217,6 +217,53 @@ export class ClaudeSdkRunner implements AgentRunner {
           }
         }
 
+        // Register skill tools (invoke_skill + read_skill_file) when skills are configured
+        if (config.skills && config.skills.length > 0) {
+          const { substituteArguments, readSupportingFile } = await import('../skill-loader')
+          const { z } = await import('zod')
+          const skills = config.skills
+
+          mcpServer.tool(
+            'invoke_skill',
+            'Load a skill by name. Returns the full instructions with arguments substituted. If the content references additional files (e.g., [PATTERNS.md](PATTERNS.md)), use read_skill_file to load them.',
+            {
+              skillName: z.string().describe('The kebab-case name of the skill to invoke'),
+              arguments: z.string().optional().describe('Arguments to substitute into the skill content'),
+            },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            async (args: { skillName: string; arguments?: string }): Promise<any> => {
+              const skill = skills.find((s) => s.name === args.skillName)
+              if (!skill) {
+                return { content: [{ type: 'text' as const, text: `Skill "${args.skillName}" not found.` }], isError: true }
+              }
+              return { content: [{ type: 'text' as const, text: substituteArguments(skill.content, args.arguments ?? '') }] }
+            },
+          )
+
+          mcpServer.tool(
+            'read_skill_file',
+            'Read a supporting file referenced by a skill (e.g., PATTERNS.md, SDK-API.md). Use when invoke_skill returns content that references additional files.',
+            {
+              skillName: z.string().describe('The skill name that owns this file'),
+              filePath: z.string().describe('Relative path within the skill directory (e.g., "PATTERNS.md")'),
+            },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            async (args: { skillName: string; filePath: string }): Promise<any> => {
+              const skill = skills.find((s) => s.name === args.skillName)
+              if (!skill) {
+                return { content: [{ type: 'text' as const, text: `Skill "${args.skillName}" not found.` }], isError: true }
+              }
+              const content = await readSupportingFile(skill, args.filePath)
+              if (content === null) {
+                return { content: [{ type: 'text' as const, text: `File "${args.filePath}" not found in skill "${args.skillName}".` }], isError: true }
+              }
+              return { content: [{ type: 'text' as const, text: content }] }
+            },
+          )
+
+          console.log(`[n8n-desk] Registered invoke_skill + read_skill_file for ${skills.length} skills on in-process MCP server`)
+        }
+
         console.log(`[n8n-desk] Registered ${allTools.length} file tools on in-process MCP server`)
         this.localMcpServers.set(sessionId, mcpServer)
 

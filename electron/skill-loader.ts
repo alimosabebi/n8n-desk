@@ -13,7 +13,7 @@ interface LoadedSkill {
   userInvocable: boolean
   allowedTools?: string[]
   directory: string
-  source: 'user' | string
+  source: 'user' | 'built-in' | string
 }
 
 /** Raw SKILL.md frontmatter fields (kebab-case as written in YAML) */
@@ -30,6 +30,30 @@ interface SkillFrontmatter {
 const BASE_DIR = path.join(os.homedir(), '.n8n-desk')
 const USER_SKILLS_DIR = path.join(BASE_DIR, 'skills')
 const PLUGINS_CACHE_DIR = path.join(BASE_DIR, 'plugins', 'cache')
+
+/**
+ * Resolve the built-in skills directory (skills shipped with the app).
+ *
+ * In dev: the skills submodule at project root / skills / plugins
+ * In production: bundled into Electron's app resources
+ *
+ * Uses a lazy import of `electron` so this module can also be used
+ * in test environments where Electron is not available.
+ */
+function getBuiltinSkillsDir(): string {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { app } = require('electron')
+    if (app.isPackaged) {
+      // extraResource copies skills/plugins → resources/plugins
+      return path.join(process.resourcesPath, 'plugins')
+    }
+  } catch {
+    // Electron not available (e.g., tests) — fall through to dev path
+  }
+  // Dev: resolve from this file's location → electron/ → project root → skills/plugins
+  return path.join(__dirname, '..', 'skills', 'plugins')
+}
 
 // --- SKILL.md Parsing ---
 
@@ -151,18 +175,28 @@ async function scanSkillDirectory(
 }
 
 /**
- * Load all skills from:
- * 1. Plugin cache directories (each plugin may have a skills/ subdirectory)
- * 2. User-created skills (~/.n8n-desk/skills/)
+ * Load all skills from three locations in priority order (later overrides earlier):
+ * 1. Built-in skills (shipped with the app — lowest priority)
+ * 2. Plugin cache directories (installed via marketplace)
+ * 3. User-created skills (~/.n8n-desk/skills/ — highest priority)
  *
- * Plugin skills use the plugin directory name as their source.
- * User skills have source 'user'.
- * Deduplicates by name — user skills take precedence over plugin skills.
+ * This allows users to override built-in skills by placing a SKILL.md
+ * with the same name in their user skills directory.
+ *
+ * In dev mode, built-in skills are read directly from the skills submodule,
+ * so editing them takes effect on the next agent invocation (no restart needed).
  */
 export async function loadAllSkills(): Promise<LoadedSkill[]> {
   const skillsByName = new Map<string, LoadedSkill>()
 
-  // 1. Scan plugin cache directories for skills/ subdirectories
+  // 1. Built-in skills (lowest priority — overridable by plugins and user)
+  const builtinDir = getBuiltinSkillsDir()
+  const builtinSkills = await scanSkillDirectory(builtinDir, 'built-in')
+  for (const skill of builtinSkills) {
+    skillsByName.set(skill.name, skill)
+  }
+
+  // 2. Scan plugin cache directories for skills/ subdirectories
   try {
     const pluginDirs = await fs.readdir(PLUGINS_CACHE_DIR)
     for (const pluginDir of pluginDirs) {
@@ -178,7 +212,7 @@ export async function loadAllSkills(): Promise<LoadedSkill[]> {
     // plugins/cache/ doesn't exist yet — no plugin skills
   }
 
-  // 2. Scan user skills directory — user skills override plugin skills
+  // 3. Scan user skills directory — user skills override everything
   const userSkills = await scanSkillDirectory(USER_SKILLS_DIR, 'user')
   for (const skill of userSkills) {
     skillsByName.set(skill.name, skill)
