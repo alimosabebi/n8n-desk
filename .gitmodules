@@ -1,3 +1,6 @@
 [submodule "skills"]
 	path = skills
 	url = https://github.com/geckse/n8n-desk-skills-hub.git
+[submodule "web"]
+	path = web
+	url = https://github.com/geckse/n8n-desk-webpage.git
