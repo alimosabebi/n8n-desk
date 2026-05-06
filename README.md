@@ -26,6 +26,40 @@
 
 ---
 
+<table align="center">
+<tr>
+<td align="center">
+
+# 🚧 Pre-Release — No Binary Builds Yet 🚧
+
+### **n8n-desk is under active development.**
+
+**There are no installers, downloads, or App Store releases available right now.**
+No `.dmg`, no `.exe`, no `.AppImage` — nothing to install yet.
+
+The repo is public for transparency and contributions, but the app is **not ready for end users**.
+APIs, storage formats, and behavior may change without notice until the first alpha.
+
+<br/>
+
+## ⭐ Want to be one of the first users?
+
+### **[→ JOIN THE WAITLIST AT n8n-desk.app ←](https://n8n-desk.app)**
+
+Waitlist members get **early access** to the first alpha builds —
+before the broader public release.
+
+<br/>
+
+[![Join the Waitlist](https://img.shields.io/badge/Join_the_Waitlist-→-FF6D5A?style=for-the-badge&logoWidth=40)](https://n8n-desk.app)
+[![Star on GitHub](https://img.shields.io/github/stars/geckse/n8n-desk?style=for-the-badge&logo=github&label=Star%20to%20Follow%20Development)](https://github.com/geckse/n8n-desk)
+
+</td>
+</tr>
+</table>
+
+---
+
 ## Built with
 
 ![Vue 3](https://img.shields.io/badge/Vue_3-35495E?logo=vue.js&logoColor=4FC08D)
