@@ -37,7 +37,8 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Build renderer (Vite)
-        run: pnpm build
+        run: pnpm exec vite build
+
 
       - name: Build Electron main process
         run: pnpm build:electron:ts
