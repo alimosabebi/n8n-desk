@@ -1,6 +1,8 @@
 {
   "name": "n8n-desk",
   "version": "0.1.0",
+  "author": "AliM",
+  "description": "Desktop client for n8n built with Electron and Vue",
   "private": true,
   "type": "module",
   "main": "electron/dist/main.js",
