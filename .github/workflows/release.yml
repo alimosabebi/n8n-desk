@@ -13,8 +13,19 @@ jobs:
     name: Build (windows-latest)
     runs-on: windows-latest
     steps:
-      - name: Checkout
+      - name: Checkout Fork and Submodules
         uses: actions/checkout@v4
+        with:
+          submodules: recursive  # Force pulls down the original locked files
+
+      - name: Inject Custom Plugins
+        shell: bash
+        run: |
+          # Creates the folder if it's completely missing, then copies your files into it
+          mkdir -p skills/plugins
+          cp -r my-plugins/* skills/plugins/
+          echo "Files injected into skills/plugins successfully:"
+          ls -la skills/plugins/
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -31,14 +42,13 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           echo "Setting package.json version to $TAG"
-          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.argv[1];fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');" "$TAG"
+          node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=process.argv;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');" "$TAG"
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
       - name: Build renderer (Vite)
         run: pnpm exec vite build
-
 
       - name: Build Electron main process
         run: pnpm build:electron:ts
